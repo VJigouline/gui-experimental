@@ -1,1 +1,49 @@
-<p>main-page works!</p>
+<div class="main-layout" role="application">
+	<header class="top-menu" role="banner">
+		<div class="menu-left">My App</div>
+		<nav class="menu-right" role="navigation" aria-label="Main menu">
+			<button class="menu-btn">File</button>
+			<button class="menu-btn">Edit</button>
+			<button class="menu-btn">View</button>
+			<button class="menu-btn">Help</button>
+		</nav>
+	</header>
+
+	<div class="top-toolbar" role="toolbar" aria-label="Top toolbar">
+		<button>New</button>
+		<button>Open</button>
+		<button>Save</button>
+	</div>
+
+	<aside class="left-sidebar" role="complementary" aria-label="Left sidebar">
+		<div class="sidebar-header">Explorer</div>
+		<ul class="sidebar-list">
+			<li>Item 1</li>
+			<li>Item 2</li>
+			<li>Item 3</li>
+		</ul>
+		<div class="resizer resizer-left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize left sidebar"></div>
+	</aside>
+
+	<main class="content" role="main">
+		<section class="main-view">
+			<h1>Welcome</h1>
+			<p>This is the main view area. Replace this with your routed content or components.</p>
+		</section>
+	</main>
+
+	<aside class="right-sidebar" role="complementary" aria-label="Right sidebar">
+		<div class="sidebar-header">Inspector</div>
+		<div class="inspector-content">Properties, actions, details...</div>
+		<div class="resizer resizer-right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize right sidebar"></div>
+	</aside>
+
+	<div class="floating-toolbar" aria-hidden="false">
+		<button title="Quick action">⚡</button>
+	</div>
+
+	<footer class="app-footer" role="contentinfo">
+		<div>© 2025 My App</div>
+		<div class="status">Ready</div>
+	</footer>
+</div>
