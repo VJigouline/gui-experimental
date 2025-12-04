@@ -1,3 +1,5 @@
+
+/* default variables (used if no theme class present) */
 :root {
 	--sidebar-width: 250px;
 	--right-sidebar-width: 300px;
@@ -5,10 +7,28 @@
 	--toolbar-height: 40px;
 	--footer-height: 28px;
 	--gap: 8px;
-	--bg: #0f1720;
+	--bg: #071025;
 	--panel: #111827;
 	--muted: #9ca3af;
 	--accent: #2563eb;
+}
+
+/* Dark theme (default look used previously) */
+:root.theme-dark {
+	--bg: #071025;
+	--panel: #111827;
+	--muted: #9ca3af;
+	--accent: #2563eb;
+	color-scheme: dark;
+}
+
+/* Light theme */
+:root.theme-light {
+	--bg: #f7fafc;
+	--panel: #ffffff;
+	--muted: #6b7280;
+	--accent: #1d4ed8;
+	color-scheme: light;
 }
 
 .main-layout {
@@ -24,8 +44,9 @@
 		"left content right"
 		"footer footer footer";
 	gap: var(--gap);
-	background: linear-gradient(180deg, #071025 0%, #061018 100%);
-	color: #e6eef8;
+	background: linear-gradient(180deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 90%, #000 10%) 100%);
+	color: var(--muted);
+	transition: background 220ms ease, color 220ms ease;
 	padding: 0;
 }
 

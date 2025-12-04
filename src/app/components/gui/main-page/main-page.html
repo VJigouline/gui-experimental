@@ -6,6 +6,9 @@
 			<button class="menu-btn">Edit</button>
 			<button class="menu-btn">View</button>
 			<button class="menu-btn">Help</button>
+			<button class="menu-btn" (click)="toggleTheme()" [attr.aria-pressed]="isDark" title="Toggle theme">
+				{{ isDark ? 'Light' : 'Dark' }}
+			</button>
 		</nav>
 	</header>
 

@@ -16,10 +16,24 @@ export class MainPage implements AfterViewInit, OnDestroy {
   private startX = 0;
   private startLeftWidth = 250;
   private startRightWidth = 300;
+  isDark = true;
 
   constructor(private host: ElementRef) {}
 
   ngAfterViewInit(): void {
+    // initialize theme from localStorage (if present)
+    try {
+      const stored = localStorage.getItem('app-theme');
+      if (stored === 'light') {
+        this.applyTheme('light');
+      } else {
+        // default to dark if not specified
+        this.applyTheme('dark');
+      }
+    } catch (err) {
+      this.applyTheme('dark');
+    }
+
     const root = this.host.nativeElement as HTMLElement;
     this.leftResizer = root.querySelector('.resizer-left');
     this.rightResizer = root.querySelector('.resizer-right');
@@ -88,4 +102,23 @@ export class MainPage implements AfterViewInit, OnDestroy {
     document.addEventListener('pointermove', this.onPointerMoveRight as any);
     document.addEventListener('pointerup', this.onPointerUpRight as any);
   };
+
+  toggleTheme(): void {
+    this.applyTheme(this.isDark ? 'light' : 'dark');
+  }
+
+  private applyTheme(mode: 'dark' | 'light') {
+    const doc = document.documentElement;
+    if (mode === 'light') {
+      doc.classList.remove('theme-dark');
+      doc.classList.add('theme-light');
+      this.isDark = false;
+      try { localStorage.setItem('app-theme', 'light'); } catch {}
+    } else {
+      doc.classList.remove('theme-light');
+      doc.classList.add('theme-dark');
+      this.isDark = true;
+      try { localStorage.setItem('app-theme', 'dark'); } catch {}
+    }
+  }
 }
