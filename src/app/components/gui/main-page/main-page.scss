@@ -130,12 +130,23 @@
 	overflow: auto;
 	display: flex;
 	flex-direction: column;
+	min-height: 0; /* allow children to flex correctly */
 }
 .main-view {
 	background: rgba(255,255,255,0.02);
 	border-radius: 8px;
-	padding: 18px;
-	min-height: 200px;
+	padding: 0;
+	display: flex;
+	flex: 1 1 auto;
+	min-height: 0; /* allow inner canvas to size to container */
+}
+
+.main-view .canvas-host,
+.main-view app-canvas3d,
+.main-view .canvas3d-container {
+	flex: 1 1 auto;
+	min-height: 0;
+	width: 100%;
 }
 
 .app-footer {

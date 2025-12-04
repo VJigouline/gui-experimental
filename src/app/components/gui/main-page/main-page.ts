@@ -1,10 +1,12 @@
-import { Component, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
+import { Component, ElementRef, AfterViewInit, OnDestroy, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
+import { Canvas3d } from "../../gui3d/canvas3d/canvas3d";
 
 @Component({
   selector: 'app-main-page',
-  imports: [],
+  imports: [Canvas3d],
   templateUrl: './main-page.html',
   styleUrls: ['./main-page.scss'],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class MainPage implements AfterViewInit, OnDestroy {
   private leftResizer: HTMLElement | null = null;
