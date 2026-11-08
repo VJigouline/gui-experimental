@@ -79,15 +79,17 @@ export class SceneDocument {
 
   // ------------------------------------------------------------ editing
 
+  /** Replaces the scene with an empty one, lit by the default lights. */
+  newScene(): void {
+    this.clear();
+    this.addLights();
+    this.touch();
+  }
+
   /** Replaces the scene with the starting one: lights and a few shapes. */
   reset(): void {
     this.clear();
-    const hemi = new THREE.HemisphereLight(0xdde6ff, 0x30302a, 1.2);
-    hemi.name = 'Sky light';
-    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-    sun.name = 'Sun';
-    sun.position.set(5, 9, 6);
-    this.scene.add(hemi, sun);
+    this.addLights();
 
     const assembly = new THREE.Group();
     assembly.name = 'Assembly';
@@ -103,6 +105,15 @@ export class SceneDocument {
     this.scene.add(at(this.make('cone'), -1.8, 0.5, 2));
     this.scene.add(at(this.make('torus'), 1.8, 0.35, 2));
     this.touch();
+  }
+
+  private addLights(): void {
+    const hemi = new THREE.HemisphereLight(0xdde6ff, 0x30302a, 1.2);
+    hemi.name = 'Sky light';
+    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+    sun.name = 'Sun';
+    sun.position.set(5, 9, 6);
+    this.scene.add(hemi, sun);
   }
 
   /** Removes everything. */

@@ -132,7 +132,11 @@ export class PropertiesPanel {
   protected readonly channel = computed(() => channelInfo(this.panel.channel()));
 
   private readonly selection = this.panel.retained('selection');
-  protected readonly ids = computed(() => this.doc.objects(this.selection()?.ids).map(o => o.uuid));
+  /** Selected objects still in the scene; rechecked as the scene changes. */
+  protected readonly ids = computed(() => {
+    this.doc.revision();
+    return this.doc.objects(this.selection()?.ids).map(o => o.uuid);
+  });
   protected readonly count = computed(() => this.ids().length);
 
   protected readonly axes = [0, 1, 2] as const;
@@ -147,7 +151,8 @@ export class PropertiesPanel {
     this.doc.revision();
     const ids = this.ids();
     if (ids.length !== 1) return null;
-    const o = this.doc.get(ids[0])!;
+    const o = this.doc.get(ids[0]);
+    if (!o) return null;
     const mats = materialsOf(o);
     const m = mats[0] as THREE.MeshStandardMaterial | undefined;
     const light = (o as THREE.Light).isLight ? (o as THREE.Light) : null;

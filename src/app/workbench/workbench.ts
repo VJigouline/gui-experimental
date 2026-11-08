@@ -155,8 +155,8 @@ export class Workbench {
   // ------------------------------------------------------------ scene
 
   protected async newScene(): Promise<void> {
-    if (await this.dialogs.confirm('New scene', 'Replace the scene with the starting shapes? Changes to it are lost.', 'New scene')) {
-      this.doc.reset();
+    if (await this.dialogs.confirm('New scene', 'Remove everything from the scene, keeping only the default lights? Changes to it are lost.', 'New scene')) {
+      this.doc.newScene();
       this.status.set('New scene');
     }
   }

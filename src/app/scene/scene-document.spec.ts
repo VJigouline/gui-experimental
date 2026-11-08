@@ -91,6 +91,14 @@ describe('SceneDocument', () => {
     expect(doc.bounds().isEmpty()).toBe(false);
   });
 
+  it('starts a new scene with only the lights', () => {
+    doc.newScene();
+    expect(names()).toEqual(['Sky light', 'Sun']);
+    expect(doc.objectCount()).toBe(2);
+    // Names start again from 1.
+    expect(doc.get(doc.add('box'))!.name).toBe('Box 1');
+  });
+
   it('resets to the starting scene', () => {
     doc.add('torus');
     doc.reset();

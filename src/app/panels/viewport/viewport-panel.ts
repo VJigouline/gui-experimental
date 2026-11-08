@@ -80,7 +80,10 @@ export class ViewportPanel {
 
   private readonly selection = this.panel.retained('selection');
   private readonly tool = this.panel.retained('tool.mode');
-  protected readonly selectionCount = computed(() => this.doc.objects(this.selection()?.ids).length);
+  protected readonly selectionCount = computed(() => {
+    this.doc.revision();
+    return this.doc.objects(this.selection()?.ids).length;
+  });
   protected readonly mode = computed<ToolMode>(() => this.tool()?.mode ?? 'select');
   protected readonly modeLabel = computed(() => ({ select: 'Select', translate: 'Move', rotate: 'Rotate', scale: 'Scale' })[this.mode()]);
   protected readonly viewLabel = computed(() => {
