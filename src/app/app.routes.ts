@@ -1,9 +1,10 @@
 import { Routes } from '@angular/router';
-import { MainPage } from './components/gui/main-page/main-page';
 
 export const routes: Routes = [
-    {
-        path: '',
-        component: MainPage,
-    }
+  {
+    path: '',
+    // The workbench, its panels and three.js load after the page shell.
+    loadChildren: () => import('./workbench/workbench.routes').then(m => m.WORKBENCH_ROUTES),
+  },
+  { path: '**', redirectTo: '' },
 ];
