@@ -49,7 +49,7 @@ A stack's `panels` hold either ids into the top-level `panels` map, or panels wr
 
 | Field | Meaning |
 |---|---|
-| `type` | The kind of panel. Required. One of `viewport`, `scene-tree`, `properties`, `tools`, `messages`, `links`. |
+| `type` | The kind of panel. Required. One of `viewport`, `scene-tree`, `properties`, `tools`, `raytrace`, `messages`, `links`. |
 | `id` | For a panel written in place, optional; one is made up if it's left out. In the `panels` map, the key is the id. |
 | `title` | The tab's title. Defaults to the type's title, such as "3D View". |
 | `channel` | The link: `A`, `B`, `C`, `D`, or `none` for unlinked. Defaults to `A`. |
@@ -64,7 +64,7 @@ A panel may appear only once in a layout.
 | `viewport` | `camera: { position: [x, y, z], target: [x, y, z] }`, `view` (`iso`, `top`, `bottom`, `front`, `back`, `left`, `right` or `custom`), `grid`, `axes` and `wireframe` (booleans), and `background` (a CSS colour, or `theme`). |
 | `messages` | `filter` (text) and `channel` (`A`… or empty for all). |
 
-Other panels keep no state.
+Other panels keep no state. The Ray Tracing panel's settings are kept in the browser rather than the layout, as they apply to the whole workbench.
 
 ## Floating windows
 

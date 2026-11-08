@@ -2,6 +2,7 @@ import { Component, ElementRef, afterRenderEffect, computed, inject, signal, vie
 import { DatePipe } from '@angular/common';
 import { LayoutService } from '../../core/layout/layout.service';
 import { LayoutError } from '../../core/layout/layout.parse';
+import { IfcImportSettings, defaultIfcSettings } from '../../scene/ifc-settings';
 import { downloadText, readTextFile } from '../files';
 import { DialogRequest, DialogService } from './dialog.service';
 
@@ -33,6 +34,66 @@ import { DialogRequest, DialogService } from './dialog.service';
           <div class="dialog-buttons">
             <button type="button" class="btn" (click)="close()">Cancel</button>
             <button type="button" class="btn primary" autofocus (click)="resolveConfirm(true)">{{ r.ok }}</button>
+          </div>
+        }
+        @case ('ifc-options') {
+          @let r = asIfc();
+          @let o = ifc();
+          <form class="ifc-dialog" (submit)="submitIfc($event)">
+            <h2>{{ r.settingsOnly ? 'IFC import settings' : 'Import IFC' }}</h2>
+            @if (!r.settingsOnly) {
+              <p class="hint">{{ r.files.join(', ') }}</p>
+            }
+            <div class="props">
+              <fieldset>
+                <legend>Geometry</legend>
+                <label class="field" title="Subtract openings and voiding features from the walls and slabs they void.">
+                  <span>Openings</span>
+                  <span class="check"><input type="checkbox" [checked]="o.openings" (change)="setIfc({ openings: checked($event) })" /> Cut out of elements</span>
+                </label>
+                <label class="field" title="Segments for a full circle; arcs use their share.">
+                  <span>Circles</span>
+                  <span class="range"><input type="range" min="8" max="96" step="4" [value]="o.circleSegments" (input)="setIfc({ circleSegments: num($event) })" /><output>{{ o.circleSegments }} segments</output></span>
+                </label>
+                <label class="field" title="Faces meeting at less than this angle are shaded smoothly; sharper edges stay sharp.">
+                  <span>Smoothing</span>
+                  <span class="range"><input type="range" min="0" max="90" step="5" [value]="o.creaseAngle" (input)="setIfc({ creaseAngle: num($event) })" /><output>{{ o.creaseAngle }}°</output></span>
+                </label>
+              </fieldset>
+              <fieldset>
+                <legend>Content</legend>
+                <label class="field" title="Include IfcSpace volumes, the rooms.">
+                  <span>Spaces</span>
+                  <span class="check"><input type="checkbox" [checked]="o.spaces" (change)="setIfc({ spaces: checked($event) })" /> Room volumes</span>
+                </label>
+                <label class="field" title="Include IfcOpeningElement volumes as objects of their own.">
+                  <span>Openings</span>
+                  <span class="check"><input type="checkbox" [checked]="o.openingElements" (change)="setIfc({ openingElements: checked($event) })" /> Opening volumes</span>
+                </label>
+                <label class="field" title="Read property and quantity sets, shown in Properties.">
+                  <span>Properties</span>
+                  <span class="check"><input type="checkbox" [checked]="o.properties" (change)="setIfc({ properties: checked($event) })" /> Property and quantity sets</span>
+                </label>
+              </fieldset>
+            </div>
+            <label class="check ask">
+              <input type="checkbox" [checked]="o.ask" (change)="setIfc({ ask: checked($event) })" />
+              Ask before each IFC import (File › IFC import settings… changes these later)
+            </label>
+            <div class="dialog-buttons">
+              <button type="button" class="btn" (click)="ifc.set({ ...defaults(), ask: ifc().ask })">Defaults</button>
+              <span class="spacer"></span>
+              <button type="button" class="btn" (click)="close()">Cancel</button>
+              <button type="submit" class="btn primary" autofocus>{{ r.settingsOnly ? 'Save' : 'Import' }}</button>
+            </div>
+          </form>
+        }
+        @case ('busy') {
+          @let r = asBusy();
+          <div class="busy" role="status" aria-live="polite">
+            <h2>{{ r.title }}</h2>
+            <p>{{ r.message }}</p>
+            <progress></progress>
           </div>
         }
         @case ('message') {
@@ -125,6 +186,8 @@ import { DialogRequest, DialogService } from './dialog.service';
             <ul>
               <li>Drag to orbit, right-drag to pan, scroll to zoom. Click to select; <kbd>Shift</kbd>+click to add.</li>
               <li><kbd>Q</kbd> select, <kbd>W</kbd> move, <kbd>E</kbd> rotate, <kbd>R</kbd> scale, <kbd>F</kbd> fit, <kbd>Delete</kbd> remove, <kbd>Esc</kbd> deselect.</li>
+              <li><kbd>G</kbd>, or 🚶 Walk, walks through the scene: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrows move, <kbd>Q</kbd>/<kbd>E</kbd> go down and up, drag to look, hold <kbd>Shift</kbd> to run, and the wheel sets the speed. <kbd>Esc</kbd> or <kbd>G</kbd> goes back to orbiting.</li>
+              <li><kbd>Z</kbd> switches to the ray traced image and back.</li>
             </ul>
             <h3>Saving layouts</h3>
             <ul>
@@ -148,6 +211,9 @@ export class DialogHost {
   protected readonly request = this.dialogs.current;
   protected readonly wide = computed(() => ['layout-json', 'layouts', 'help'].includes(this.request()?.kind ?? ''));
   protected readonly promptValue = signal('');
+  /** The IFC settings being edited. */
+  protected readonly ifc = signal<IfcImportSettings>(defaultIfcSettings());
+  protected readonly defaults = defaultIfcSettings;
   protected readonly json = signal('');
   protected readonly jsonError = signal('');
   protected readonly saveName = signal('');
@@ -166,6 +232,7 @@ export class DialogHost {
         this.settled = false;
         this.jsonError.set('');
         if (r.kind === 'prompt') this.promptValue.set(r.value);
+        if (r.kind === 'ifc-options') this.ifc.set({ ...r.settings });
         if (r.kind === 'layout-json') this.json.set(this.layout.toJson());
         if (r.kind === 'layouts') this.saveName.set(this.layout.layout().name ?? '');
         if (!d.open) d.showModal();
@@ -181,6 +248,12 @@ export class DialogHost {
   protected asConfirm() {
     return this.request() as Extract<DialogRequest, { kind: 'confirm' }>;
   }
+  protected asIfc() {
+    return this.request() as Extract<DialogRequest, { kind: 'ifc-options' }>;
+  }
+  protected asBusy() {
+    return this.request() as Extract<DialogRequest, { kind: 'busy' }>;
+  }
   protected asMessage() {
     return this.request() as Extract<DialogRequest, { kind: 'message' }>;
   }
@@ -193,18 +266,20 @@ export class DialogHost {
 
   protected cancel(event: Event): void {
     event.preventDefault();
-    this.close();
+    // A busy dialog stays until the work is done.
+    if (this.request()?.kind !== 'busy') this.close();
   }
 
   protected onClosed(): void {
     if (this.request()) this.close();
   }
 
-  private settle(answer?: string | boolean): void {
+  private settle(answer?: string | boolean | IfcImportSettings): void {
     if (this.settled) return;
     this.settled = true;
     const r = this.request();
-    if (r?.kind === 'prompt') r.resolve(typeof answer === 'string' ? answer : null);
+    if (r?.kind === 'ifc-options') r.resolve(typeof answer === 'object' ? answer : null);
+    else if (r?.kind === 'prompt') r.resolve(typeof answer === 'string' ? answer : null);
     else if (r?.kind === 'confirm') r.resolve(answer === true);
     else if (r?.kind === 'message') r.resolve();
   }
@@ -215,6 +290,24 @@ export class DialogHost {
     if (!v) return;
     this.settle(v);
     this.dialogs.close();
+  }
+
+  protected setIfc(patch: Partial<IfcImportSettings>): void {
+    this.ifc.update(s => ({ ...s, ...patch }));
+  }
+
+  protected submitIfc(event: Event): void {
+    event.preventDefault();
+    this.settle(this.ifc());
+    this.dialogs.close();
+  }
+
+  protected checked(event: Event): boolean {
+    return (event.target as HTMLInputElement).checked;
+  }
+
+  protected num(event: Event): number {
+    return +(event.target as HTMLInputElement).value;
   }
 
   protected resolveConfirm(v: boolean): void {

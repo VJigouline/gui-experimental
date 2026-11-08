@@ -13,6 +13,11 @@ export interface PanelType {
   multiple: boolean;
   /** State for a new panel. */
   defaultState?: () => Record<string, unknown>;
+  /**
+   * Where a new panel goes when added without a target: into the largest stack (the default),
+   * or into a floating window of this size, like a dialog box.
+   */
+  float?: { width: number; height: number };
 }
 
 /** The panel types available. Provided by the application, and by tests. */

@@ -1270,3 +1270,166 @@ body.resizing-row canvas {
     margin-right: 6px;
   }
 }
+
+/* Ray tracing */
+
+/* The ray traced image over a 3D view. The WebGL canvas below keeps the pointer. */
+.raytrace-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.viewport-toolbar,
+.viewport-info {
+  z-index: 1;
+}
+
+.raytrace-panel {
+  .panel-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .hint {
+    margin: 4px 0;
+  }
+
+  .range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    output {
+      min-width: 28px;
+      color: var(--muted);
+      text-align: right;
+    }
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .dialog-buttons {
+    margin-top: 4px;
+  }
+}
+
+.trace-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+
+  &.error {
+    color: var(--danger);
+  }
+
+  progress {
+    width: 100%;
+    height: 6px;
+    accent-color: var(--accent);
+  }
+}
+
+/* IFC */
+
+.ifc-props {
+  .value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  details {
+    margin: 2px 0;
+    border-top: 1px solid var(--border-subtle);
+
+    summary {
+      padding: 4px 0;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .field > span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}
+
+.ifc-dialog {
+  width: min(460px, 86vw);
+
+  .props {
+    padding: 0;
+  }
+
+  .field {
+    grid-template-columns: 90px 1fr;
+  }
+
+  .range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input {
+      flex: 1;
+      min-width: 0;
+    }
+
+    output {
+      min-width: 86px;
+      color: var(--muted);
+    }
+  }
+
+  .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .ask {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+}
+
+.dialog .busy {
+  min-width: 320px;
+
+  progress {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+}
+
+/* Files dragged over the page. */
+.file-drop-hint {
+  position: fixed;
+  inset: 8px;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--text);
+  font-size: 18px;
+  text-align: center;
+  pointer-events: none;
+}

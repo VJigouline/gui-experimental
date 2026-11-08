@@ -7,6 +7,7 @@ import { PanelContext } from '../../core/panels/panel-context';
 import { MenuService } from '../../ui/menu/menu.service';
 import { SceneDocument } from '../../scene/scene-document';
 import { ThemeService } from '../../ui/theme.service';
+import { RaytraceService, describeProgress } from '../../raytrace/raytrace.service';
 
 interface CameraState {
   position: [number, number, number];
@@ -45,8 +46,10 @@ export const BACKGROUNDS = [
       class="viewport-canvas"
       #container
       tabindex="0"
-      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; Delete to remove."
-      (keydown)="onKey($event)"></div>
+      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; G to walk; Z to ray trace; Delete to remove."
+      (keydown)="onKey($event)"
+      (keyup)="onKeyUp($event)"
+      (blur)="stopWalking()"></div>
     @if (error()) {
       <div class="panel-empty">{{ error() }}</div>
     }
@@ -58,9 +61,37 @@ export const BACKGROUNDS = [
       <button type="button" class="tool-btn" [class.on]="axes()" title="Axes" (click)="toggle('axes')">⊹</button>
       <button type="button" class="tool-btn" [class.on]="wireframe()" title="Wireframe" (click)="toggle('wireframe')">◇</button>
       <button type="button" class="tool-btn" title="Background" (click)="openBackgrounds($event)">◐</button>
+      <span class="tool-sep"></span>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="walking()"
+        [attr.aria-pressed]="walking()"
+        title="Walk: WASD to move, Q/E down and up, drag to look, Shift to run, wheel for speed (G switches, Esc leaves)"
+        (click)="setWalking(!walking())">
+        🚶 Walk
+      </button>
+      @if (raytraceAvailable) {
+        <span class="tool-sep"></span>
+        <button
+          type="button"
+          class="tool-btn"
+          [class.on]="tracing()"
+          [attr.aria-pressed]="tracing()"
+          title="Ray trace this view (Z switches)"
+          (click)="toggleRaytrace()">
+          ☀ Ray trace
+        </button>
+      }
     </div>
     <div class="viewport-info">
-      {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected
+      @if (tracing()) {
+        Ray traced · {{ traceStatus() }}
+      } @else if (walking()) {
+        Walk · WASD move · Q/E down, up · drag to look · Shift run · {{ walkSpeedLabel() }} · Esc leaves
+      } @else {
+        {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected
+      }
     </div>
   `,
 })
@@ -69,12 +100,23 @@ export class ViewportPanel {
   private readonly doc = inject(SceneDocument);
   private readonly menus = inject(MenuService);
   private readonly theme = inject(ThemeService);
+  /** Ray tracing, when the workbench provides it. */
+  private readonly raytrace = inject(RaytraceService, { optional: true });
   private readonly containerRef = viewChild.required<ElementRef<HTMLDivElement>>('container');
 
   protected readonly error = signal<string | null>(null);
   protected readonly grid = this.panel.state('grid', true);
   protected readonly axes = this.panel.state('axes', false);
   protected readonly wireframe = this.panel.state('wireframe', false);
+  /** Walk mode: WASD moves the camera, dragging looks around. */
+  protected readonly walking = this.panel.state('walk', false);
+  /** Walking speed, as a multiple of the speed for the scene's size. */
+  private readonly walkSpeed = this.panel.state('walkSpeed', 1);
+  protected readonly walkSpeedLabel = computed(() => {
+    this.doc.revision();
+    const v = this.baseWalkSpeed() * this.walkSpeed();
+    return `${v < 10 ? v.toFixed(1) : Math.round(v)} m/s`;
+  });
   protected readonly background = this.panel.state('background', BACKGROUNDS[0].value);
   protected readonly view = this.panel.state<ViewName | 'custom'>('view', 'iso');
 
@@ -86,6 +128,9 @@ export class ViewportPanel {
   });
   protected readonly mode = computed<ToolMode>(() => this.tool()?.mode ?? 'select');
   protected readonly modeLabel = computed(() => ({ select: 'Select', translate: 'Move', rotate: 'Rotate', scale: 'Scale' })[this.mode()]);
+  /** Whether the ray traced image is shown over this view. */
+  protected readonly tracing = computed(() => !!this.raytrace?.isTracingOver(this.panel.id));
+  protected readonly traceStatus = computed(() => (this.tracing() && this.raytrace ? describeProgress(this.raytrace.progress()) : ''));
   protected readonly viewLabel = computed(() => {
     const v = this.view();
     return v === 'custom' ? 'Free' : VIEWS[v].label;
@@ -165,6 +210,7 @@ export class ViewportPanel {
       if (this.view() !== 'custom') this.panel.setState({ view: 'custom' });
     });
     this.orbit.addEventListener('end', () => this.saveCamera());
+    this.orbit.enabled = !this.walking();
 
     this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
     const helper = this.gizmo.getHelper();
@@ -181,9 +227,21 @@ export class ViewportPanel {
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('dblclick', this.onDoubleClick);
+    canvas.addEventListener('wheel', this.onWheel, { passive: false });
 
     this.resizeObserver.observe(container);
     this.updateGizmo(this.mode(), this.selection()?.ids, this.tool());
+
+    this.raytrace?.register({
+      id: this.panel.id,
+      title: () => this.panel.title(),
+      container,
+      camera: this.camera,
+      webgl: this.renderer,
+      background: () => this.backgroundColour(),
+      size: () => ({ width: container.clientWidth, height: container.clientHeight }),
+      requestRender: () => this.requestRender(),
+    });
   }
 
   private readonly resizeObserver = new ResizeObserver(() => {
@@ -194,6 +252,7 @@ export class ViewportPanel {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.raytrace?.resized(this.panel.id, w, h);
     if (this.fitOnFirstSize) {
       // A view without a saved camera frames the scene from its view direction.
       this.fitOnFirstSize = false;
@@ -203,6 +262,8 @@ export class ViewportPanel {
   });
 
   private dispose(): void {
+    this.stopWalking();
+    this.raytrace?.unregister(this.panel.id);
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
     this.gizmo?.detach();
@@ -237,14 +298,30 @@ export class ViewportPanel {
     this.axesHelper.visible = this.axes();
     this.updateBoxes();
 
-    const bg = this.background();
-    r.setClearColor(bg === 'theme' ? getComputedStyle(this.containerRef().nativeElement).getPropertyValue('--viewport-bg').trim() || '#1b2230' : bg);
+    r.setClearColor(this.backgroundColour());
     r.clear();
-    const scene = this.doc.scene;
-    scene.overrideMaterial = this.wireframe() ? this.wireMaterial : null;
-    r.render(scene, this.camera);
-    scene.overrideMaterial = null;
-    r.render(this.overlay, this.camera);
+    // With the ray traced image over the view, WebGL only clears; the image covers it.
+    if (!this.tracing()) {
+      const scene = this.doc.scene;
+      scene.overrideMaterial = this.wireframe() ? this.wireMaterial : null;
+      r.render(scene, this.camera);
+      scene.overrideMaterial = null;
+      r.render(this.overlay, this.camera);
+    }
+    // Ray traces again from the camera as it is now, when this view is traced.
+    this.raytrace?.render(this.panel.id);
+  }
+
+  /** The view's background as a CSS colour. */
+  private backgroundColour(): string {
+    const bg = this.background();
+    return bg === 'theme' ? getComputedStyle(this.containerRef().nativeElement).getPropertyValue('--viewport-bg').trim() || '#1b2230' : bg;
+  }
+
+  protected readonly raytraceAvailable = !!this.raytrace;
+
+  protected toggleRaytrace(): void {
+    this.raytrace?.toggleView(this.panel.id);
   }
 
   private updateBoxes(): void {
@@ -383,6 +460,7 @@ export class ViewportPanel {
   private readonly onPointerDown = (e: PointerEvent) => {
     this.containerRef().nativeElement.focus({ preventScroll: true });
     this.pointerDown = { x: e.clientX, y: e.clientY, onGizmo: !!this.gizmo?.object && this.gizmo.axis !== null };
+    if (this.walking() && !this.pointerDown.onGizmo && e.button === 0) this.startLook(e);
   };
 
   private readonly onPointerUp = (e: PointerEvent) => {
@@ -422,7 +500,16 @@ export class ViewportPanel {
   protected onKey(e: KeyboardEvent): void {
     const modes: Record<string, ToolMode> = { q: 'select', w: 'translate', e: 'rotate', r: 'scale' };
     const key = e.key.toLowerCase();
-    if (modes[key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (this.walking() && plain && WALK_KEYS.has(e.code)) {
+      // While walking, WASD, Q/E and the arrows move the camera instead of choosing tools.
+      this.walkKeys.add(e.code);
+      this.startWalkLoop();
+    } else if (this.walking() && key === 'escape') {
+      this.setWalking(false);
+    } else if (key === 'g' && plain && !e.repeat) {
+      this.setWalking(!this.walking());
+    } else if (modes[key] && plain) {
       const t = this.tool();
       this.panel.publish('tool.mode', { mode: modes[key], space: t?.space ?? 'world', snap: t?.snap ?? null }, true);
     } else if (key === 'f') {
@@ -432,6 +519,8 @@ export class ViewportPanel {
       if (!ids.length) return;
       this.doc.remove(ids);
       this.panel.publish('selection', { ids: [] }, true);
+    } else if (key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && this.raytrace) {
+      this.raytrace.toggleView(this.panel.id);
     } else if (key === 'escape') {
       this.panel.publish('selection', { ids: [] }, true);
     } else {
@@ -439,7 +528,140 @@ export class ViewportPanel {
     }
     e.preventDefault();
   }
+
+  // ------------------------------------------------------------ walking
+
+  private readonly walkKeys = new Set<string>();
+  private walkFrame = 0;
+  private walkLast = 0;
+
+  /** Turns walk mode on or off. Orbiting is off while walking. */
+  protected setWalking(on: boolean): void {
+    if (!on) this.stopWalking();
+    if (this.orbit) {
+      this.orbit.enabled = !on;
+      if (!on) this.orbit.update();
+    }
+    this.panel.setState({ walk: on });
+    if (on) this.containerRef().nativeElement.focus({ preventScroll: true });
+  }
+
+  protected onKeyUp(e: KeyboardEvent): void {
+    if (this.walkKeys.delete(e.code) && this.walkKeys.size === 0) this.endWalkMove();
+  }
+
+  /** Stops moving, as when the view loses focus. */
+  stopWalking(): void {
+    const moving = this.walkKeys.size > 0;
+    this.walkKeys.clear();
+    cancelAnimationFrame(this.walkFrame);
+    this.walkFrame = 0;
+    if (moving) this.saveCamera();
+  }
+
+  private endWalkMove(): void {
+    cancelAnimationFrame(this.walkFrame);
+    this.walkFrame = 0;
+    this.saveCamera();
+  }
+
+  /** Walking speed in scene units (metres) per second for the scene's size, before the speed setting. */
+  private baseWalkSpeed(): number {
+    const box = this.doc.bounds();
+    if (box.isEmpty()) return 1.5;
+    const size = box.getSize(new THREE.Vector3());
+    // About a tenth of the scene's width a second, and at least a slow walk.
+    return Math.max(Math.max(size.x, size.z) / 10, 0.5);
+  }
+
+  private startWalkLoop(): void {
+    if (this.walkFrame) return;
+    if (this.view() !== 'custom') this.panel.setState({ view: 'custom' });
+    this.walkLast = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(Math.max((now - this.walkLast) / 1000, 0), 0.1);
+      this.walkLast = now;
+      this.walkStep(dt);
+      this.walkFrame = this.walkKeys.size ? requestAnimationFrame(step) : 0;
+    };
+    this.walkFrame = requestAnimationFrame(step);
+  }
+
+  /** Moves the camera for the keys held: over the ground plane, and up or down. */
+  private walkStep(dt: number): void {
+    const k = this.walkKeys;
+    const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
+    if (forward.lengthSq() < 1e-8) forward.set(0, 1, 0).applyQuaternion(this.camera.quaternion).setY(0);
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
+    const move = new THREE.Vector3();
+    if (k.has('KeyW') || k.has('ArrowUp')) move.add(forward);
+    if (k.has('KeyS') || k.has('ArrowDown')) move.sub(forward);
+    if (k.has('KeyD') || k.has('ArrowRight')) move.add(right);
+    if (k.has('KeyA') || k.has('ArrowLeft')) move.sub(right);
+    if (k.has('KeyE') || k.has('PageUp')) move.y += 1;
+    if (k.has('KeyQ') || k.has('PageDown')) move.y -= 1;
+    if (move.lengthSq() === 0) return;
+    const run = k.has('ShiftLeft') || k.has('ShiftRight') ? 3 : 1;
+    move.normalize().multiplyScalar(this.baseWalkSpeed() * this.walkSpeed() * run * dt);
+    this.camera.position.add(move);
+    this.orbit?.target.add(move);
+    this.requestRender();
+  }
+
+  /** Dragging turns the camera on the spot, keeping it level. */
+  private startLook(e: PointerEvent): void {
+    const canvas = e.currentTarget as HTMLElement;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+    let moved = false;
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - lastX;
+      const dy = ev.clientY - lastY;
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (!dx && !dy) return;
+      moved = true;
+      euler.setFromQuaternion(this.camera.quaternion);
+      euler.y -= dx * 0.004;
+      euler.x = Math.max(-1.55, Math.min(1.55, euler.x - dy * 0.004));
+      euler.z = 0;
+      this.camera.quaternion.setFromEuler(euler);
+      // Keep the orbit centre ahead, so leaving walk mode orbits round what is in front.
+      if (this.orbit) {
+        const d = Math.max(this.camera.position.distanceTo(this.orbit.target), 0.5);
+        this.orbit.target.copy(this.camera.position).addScaledVector(this.camera.getWorldDirection(new THREE.Vector3()), d);
+      }
+      if (this.view() !== 'custom') this.panel.setState({ view: 'custom' });
+      this.requestRender();
+    };
+    const end = () => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', end);
+      canvas.removeEventListener('pointercancel', end);
+      if (moved) this.saveCamera();
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+  }
+
+  /** In walk mode, the wheel changes walking speed. */
+  private readonly onWheel = (e: WheelEvent) => {
+    if (!this.walking()) return;
+    e.preventDefault();
+    const speed = Math.min(Math.max(this.walkSpeed() * (e.deltaY < 0 ? 1.25 : 0.8), 0.05), 50);
+    this.panel.setState({ walkSpeed: Math.round(speed * 1000) / 1000 });
+  };
 }
+
+/** Keys that move the camera in walk mode, by `KeyboardEvent.code`, so they work on any keyboard layout. */
+const WALK_KEYS = new Set([
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown',
+  'ShiftLeft', 'ShiftRight',
+]);
 
 /** Whether an object and all its parents are visible. */
 function isShown(o: THREE.Object3D): boolean {

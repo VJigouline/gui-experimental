@@ -4,6 +4,7 @@ import { MessagesPanel } from './messages/messages-panel';
 import { PropertiesPanel } from './properties/properties-panel';
 import { SceneTreePanel } from './scene-tree/scene-tree-panel';
 import { ToolsPanel } from './tools/tools-panel';
+import { RaytracePanel } from './raytrace/raytrace-panel';
 import { ViewportPanel } from './viewport/viewport-panel';
 
 /** The panels the workbench offers. Add an entry here to add a kind of panel. */
@@ -39,6 +40,15 @@ export const APP_PANEL_TYPES: readonly PanelType[] = [
     description: 'Transform tools, adding shapes and models, and commands on the selection',
     component: ToolsPanel,
     multiple: true,
+  },
+  {
+    type: 'raytrace',
+    title: 'Ray Tracing',
+    icon: '☀',
+    description: 'Photorealistic images of a 3D view with MeerCADRaytracer',
+    component: RaytracePanel,
+    multiple: false,
+    float: { width: 360, height: 620 },
   },
   {
     type: 'messages',

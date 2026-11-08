@@ -30,6 +30,8 @@
     "@angular/forms": "^22.2.5",
     "@angular/platform-browser": "^22.2.5",
     "@angular/router": "^22.2.5",
+    "meercad-ifc-import": "github:VJigouline/MeerCADIFCImport#54548ef613fb4cf2cc6d63eeb914549673aba8fe",
+    "meercad-raytracer": "github:VJigouline/MeerCADRaytracer#a01f4e91abcc30a8720aff9ecdb640ea06bbf79c",
     "rxjs": "~7.8.0",
     "three": "^0.187.0",
     "tslib": "^2.3.0"

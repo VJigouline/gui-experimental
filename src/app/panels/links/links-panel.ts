@@ -3,6 +3,7 @@ import { CHANNELS, channelInfo } from '../../core/bus/panel-bus';
 import { LayoutService } from '../../core/layout/layout.service';
 import { allStacks, stacksOf, windowOfNode } from '../../core/layout/layout.ops';
 import { PanelActions } from '../../dock/panel-actions';
+import { SelectValue } from '../../ui/select-value';
 
 /**
  * Every open panel, with its link channel. Panels on the same channel work
@@ -10,6 +11,7 @@ import { PanelActions } from '../../dock/panel-actions';
  * of their own, apart from those on Link A.
  */
 @Component({
+  imports: [SelectValue],
   selector: 'app-links-panel',
   host: { class: 'links-panel' },
   template: `
@@ -37,7 +39,7 @@ import { PanelActions } from '../../dock/panel-actions';
             <td>
               <div class="cell-flex">
                 <span class="channel-chip" [style.background]="row.color"></span>
-                <select class="input" [attr.aria-label]="'Link of ' + row.title" [value]="row.channel" (change)="layout.setChannel(row.id, $any($event.target).value)">
+                <select class="input" [attr.aria-label]="'Link of ' + row.title" [appSelectValue]="row.channel" (change)="layout.setChannel(row.id, $any($event.target).value)">
                   @for (c of channels; track c.id) {
                     <option [value]="c.id">{{ c.label }}</option>
                   }

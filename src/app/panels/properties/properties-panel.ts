@@ -20,6 +20,13 @@ interface Props {
   light: { color: string; intensity: number } | null;
   geometry: { vertices: number; triangles: number } | null;
   children: number;
+  ifc: IfcInfo | null;
+}
+
+/** What MeerCADIFCImport puts in an object's userData.ifc, formatted for display. */
+interface IfcInfo {
+  rows: { label: string; value: string }[];
+  sets: { name: string; rows: { label: string; value: string }[] }[];
 }
 
 const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
@@ -71,6 +78,23 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
             </div>
           }
         </fieldset>
+
+        @if (p.ifc; as ifc) {
+          <fieldset class="ifc-props">
+            <legend>IFC</legend>
+            @for (row of ifc.rows; track row.label) {
+              <div class="field"><span>{{ row.label }}</span><span class="value" [title]="row.value">{{ row.value }}</span></div>
+            }
+            @for (set of ifc.sets; track set.name) {
+              <details>
+                <summary>{{ set.name }} <span class="hint">{{ set.rows.length }}</span></summary>
+                @for (row of set.rows; track row.label) {
+                  <div class="field"><span [title]="row.label">{{ row.label }}</span><span class="value" [title]="row.value">{{ row.value }}</span></div>
+                }
+              </details>
+            }
+          </fieldset>
+        }
 
         @if (p.material; as m) {
           <fieldset>
@@ -183,6 +207,7 @@ export class PropertiesPanel {
           }
         : null,
       children: o.children.length,
+      ifc: ifcInfo(o.userData['ifc']),
     };
   });
 
@@ -204,5 +229,42 @@ export class PropertiesPanel {
 
   protected checked(event: Event): boolean {
     return (event.target as HTMLInputElement).checked;
+  }
+}
+
+/** The IFC data an imported object carries, as label and value rows. */
+function ifcInfo(data: unknown): IfcInfo | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  const rows: { label: string; value: string }[] = [];
+  const add = (label: string, value: unknown) => {
+    const v = format(value);
+    if (v) rows.push({ label, value: v });
+  };
+  add('Entity', d['type']);
+  add('Express ID', typeof d['expressId'] === 'number' ? `#${d['expressId']}` : null);
+  add('GlobalId', d['globalId']);
+  add('Name', d['name']);
+  add('Description', d['description']);
+  add('Object type', d['objectType']);
+  add('Type object', d['typeObject']);
+  add('Materials', Array.isArray(d['materials']) ? d['materials'].join(', ') : null);
+  const props = (d['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+  const sets = Object.entries(props).map(([name, values]) => ({
+    name,
+    rows: Object.entries(values ?? {}).map(([label, value]) => ({ label, value: format(value) || '—' })),
+  }));
+  return { rows, sets };
+}
+
+function format(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : String(round(value, 4));
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
   }
 }

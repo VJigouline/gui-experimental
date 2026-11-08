@@ -7,7 +7,8 @@ import { PanelHost } from '../core/panels/panel-host.service';
 import { DockDrag } from '../dock/dock-drag.service';
 import { DockWorkspace } from '../dock/dock-workspace';
 import { PanelActions } from '../dock/panel-actions';
-import { MODEL_EXTENSIONS, importModel } from '../scene/model-import';
+import { MODEL_EXTENSIONS } from '../scene/model-import';
+import { ModelImportService } from '../scene/model-import.service';
 import { SceneDocument } from '../scene/scene-document';
 import { DialogHost } from '../ui/dialog/dialog-host';
 import { DialogService } from '../ui/dialog/dialog.service';
@@ -20,7 +21,12 @@ import { ThemeService } from '../ui/theme.service';
 @Component({
   selector: 'app-workbench',
   imports: [DockWorkspace, MenuHost, DialogHost, DatePipe],
-  host: { class: 'workbench' },
+  host: {
+    class: 'workbench',
+    '(dragover)': 'onFileDragOver($event)',
+    '(dragleave)': 'onFileDragLeave($event)',
+    '(drop)': 'onFileDrop($event)',
+  },
   template: `
     <header class="menubar" role="menubar">
       <div class="app-name">GUI Experimental</div>
@@ -62,6 +68,11 @@ import { ThemeService } from '../ui/theme.service';
     </div>
 
     <app-dock-workspace />
+    @if (fileDragging()) {
+      <div class="file-drop-hint" aria-hidden="true">
+        <div>Drop to import<br /><span class="hint">{{ modelAccept }}</span></div>
+      </div>
+    }
 
     <footer class="statusbar" role="contentinfo">
       <span>{{ status() }}</span>
@@ -99,9 +110,11 @@ export class Workbench {
   protected readonly menuNames = ['File', 'Panels', 'Layout', 'Help'] as const;
   protected readonly modelAccept = MODEL_EXTENSIONS.join(',');
   protected readonly status = signal('Ready');
+  protected readonly fileDragging = signal(false);
+  private readonly importer = inject(ModelImportService);
   protected readonly windowCount = computed(() => this.layout.layout().floating.length);
   protected readonly quickTypes = computed(() =>
-    this.layout.panelTypes.filter(t => ['viewport', 'scene-tree', 'properties', 'tools'].includes(t.type)),
+    this.layout.panelTypes.filter(t => ['viewport', 'scene-tree', 'properties', 'tools', 'raytrace'].includes(t.type)),
   );
 
   protected openMenu(name: (typeof this.menuNames)[number], event: MouseEvent): void {
@@ -110,6 +123,7 @@ export class Workbench {
       File: () => [
         { label: 'New scene', icon: '✚', action: () => this.newScene() },
         { label: 'Import model…', icon: '⇪', hint: MODEL_EXTENSIONS.join(', '), action: () => this.modelInput().nativeElement.click() },
+        { label: 'IFC import settings…', icon: '⚙', action: () => this.importer.editIfcSettings() },
         'separator',
         { label: 'Open layout file…', icon: '📂', action: () => this.openLayoutFile() },
         { label: 'Download layout…', icon: '⇩', action: () => this.downloadLayout() },
@@ -165,22 +179,38 @@ export class Workbench {
     const input = event.target as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
-    const ids: string[] = [];
-    for (const f of files) {
-      this.status.set(`Reading ${f.name}…`);
-      try {
-        ids.push(this.doc.addObject(await importModel(f)));
-      } catch (e) {
-        this.status.set('Import failed');
-        await this.dialogs.message('Import failed', `${f.name}: ${(e as Error).message}`);
-        return;
-      }
-    }
-    if (ids.length) {
-      this.status.set(`Imported ${files.map(f => f.name).join(', ')}`);
-      this.bus.publish('selection', { ids }, { channel: 'A', retain: true });
-      this.bus.publish('viewport.command', { action: 'fit', ids }, { channel: 'A' });
-    }
+    await this.importer.importFiles(files);
+    this.status.set(this.importer.status());
+  }
+
+  // ------------------------------------------------------------ dropping files, as in SceneEditor
+
+  private static hasFiles(event: DragEvent): boolean {
+    return !!event.dataTransfer && [...event.dataTransfer.types].includes('Files');
+  }
+
+  protected onFileDragOver(event: DragEvent): void {
+    if (!Workbench.hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer!.dropEffect = 'copy';
+    this.fileDragging.set(true);
+  }
+
+  protected onFileDragLeave(event: DragEvent): void {
+    // Only when leaving the page, not when moving between its elements.
+    if (!event.relatedTarget) this.fileDragging.set(false);
+  }
+
+  protected async onFileDrop(event: DragEvent): Promise<void> {
+    if (!Workbench.hasFiles(event)) return;
+    event.preventDefault();
+    this.fileDragging.set(false);
+    // Into the link of the panel dropped on, or Link A.
+    const panelId = (event.target as Element | null)?.closest<HTMLElement>('[data-panel-id]')?.dataset['panelId'];
+    const panel = panelId ? this.layout.layout().panels[panelId] : undefined;
+    const channel = panel && panel.channel !== 'none' ? panel.channel : 'A';
+    await this.importer.importFiles([...(event.dataTransfer?.files ?? [])], channel);
+    this.status.set(this.importer.status());
   }
 
   // ------------------------------------------------------------ layouts

@@ -96,6 +96,15 @@ export class LayoutService {
       channel: init.channel ?? 'A',
       state: init.state ?? t.defaultState?.() ?? {},
     };
+    if (!target && t.float) {
+      // Near the top right, cascaded from other windows.
+      const n = this.layout().floating.length;
+      const x = Math.max(16, window.innerWidth - t.float.width - 40 - 28 * (n % 6));
+      const y = 24 + 28 * (n % 6);
+      // Kept within the page, below the menu and toolbar.
+      const height = Math.max(200, Math.min(t.float.height, window.innerHeight - y - 140));
+      target = { kind: 'float', x, y, width: t.float.width, height };
+    }
     this.state.update(l => ops.addPanel(l, id, panel, target));
     return id;
   }

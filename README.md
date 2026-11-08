@@ -9,7 +9,7 @@ A workbench of panels in one browser page, built with Angular 22 and three.js. P
 - **Linked**, so that they work together.
 - **Saved** as layouts and restored.
 
-The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, a message log, and a list of panels and their links.
+The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, ray tracing with [MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer), IFC import with [MeerCADIFCImport](https://github.com/VJigouline/MeerCADIFCImport), a message log, and a list of panels and their links.
 
 **Try it:** [vjigouline.github.io/gui-experimental](https://vjigouline.github.io/gui-experimental/)
 
@@ -83,12 +83,35 @@ The JSON format is described in [Documentation/Layout-Format.md](Documentation/L
 
 | Panel | What it does |
 |---|---|
-| 3D View | The scene, with its own camera. Drag to orbit, right-drag to pan, scroll to zoom. Click to select, Shift+click to add to the selection, double-click to frame. Keys: Q select, W move, E rotate, R scale, F fit, Delete remove, Esc deselect. Its toolbar sets the view direction, grid, axes, wireframe and background. |
+| 3D View | The scene, with its own camera. Drag to orbit, right-drag to pan, scroll to zoom. Click to select, Shift+click to add to the selection, double-click to frame. Keys: Q select, W move, E rotate, R scale, F fit, Delete remove, Esc deselect, G walk, Z ray trace. Walk mode (G, or 🚶 Walk): WASD or the arrows move over the ground, Q/E go down and up, drag to look, Shift runs, the wheel sets the speed, Esc leaves. Its toolbar sets the view direction, grid, axes, wireframe and background. |
 | Scene Tree | The scene's objects as a tree. Click to select; Ctrl+click and Shift+click select more. Double-click to frame, 👁 to hide. Drag a row onto another to move it inside. |
-| Properties | The selected object's name, visibility, transform, material or light, for editing. |
-| Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights and models (glTF, GLB, STL, OBJ). Duplicates, deletes, groups and ungroups the selection. |
+| Properties | The selected object's name, visibility, transform, material or light, for editing. For IFC elements, also their entity type, GlobalId, materials and property sets. |
+| Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights and models (glTF, GLB, STL, OBJ, IFC). Duplicates, deletes, groups and ungroups the selection. |
+| Ray Tracing | Photorealistic images of a 3D view with MeerCADRaytracer, as on SceneEditor's Photorealistic tab. See [Ray tracing](#ray-tracing). |
 | Messages | The messages panels send each other, with their channel, sender and content. |
 | Panels & Links | Every open panel, with its title, link and place, for editing. |
+
+## Importing models
+
+glTF, GLB, STL, OBJ and IFC files can be imported from **File › Import model…**, the toolbar's **Import…**, or **Edit Tools**. They can also be dropped onto the page. As in SceneEditor:
+
+- **IFC files** are read with [MeerCADIFCImport](https://github.com/VJigouline/MeerCADIFCImport): IFC2X3 and the IFC4 line, in metres with Y up. The **Import IFC** dialog sets its options first: cutting openings out of elements, circle segments, the smoothing angle, room volumes, opening volumes, and property sets. The choices are kept in the browser. Untick *Ask before each IFC import* to skip the dialog, and change the settings later in **File › IFC import settings…**.
+- **While a file imports,** a dialog says so, since the readers run in the page. Large IFC models take a few seconds.
+- **A file that can't be read** shows a **Failure** dialog with the reason, and the scene is unchanged. Warnings go to the browser console.
+- **Afterwards,** the model is named after its file, and selected and framed on a link channel. That's Link A from the menu or toolbar, the Edit Tools panel's link from there, or the link of the panel the files were dropped on.
+
+Selecting an IFC element shows its IFC data in Properties, with each property set as a section that opens.
+
+## Ray tracing
+
+[MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer) traces the scene in web workers, as in SceneEditor.
+
+- **Over a 3D view:** press **Z** in a 3D view, or use its ☀ Ray trace button, to show the ray traced image over it. Press Z again to go back. The view still takes the mouse, so orbiting, selecting and the gizmo keep working, and every change starts the image again.
+- **In a separate window:** the Ray Tracing panel's ⧉ Window opens a browser window showing the image, which follows the 3D view's camera while the view keeps drawing with WebGL. Closing that window turns ray tracing off.
+- **The Ray Tracing panel** chooses which 3D view to trace, and shows progress. It restarts, stops and saves the image as PNG, and has SceneEditor's settings: samples, bounces, resolution, preview, worker threads, shadows, global illumination, tone mapping, exposure, colour space and background. The settings are kept in the browser.
+- **Adding the panel:** it is a tab in the Modelling preset. Added from the Panels menu or toolbar, it opens in a floating window, like a dialog box.
+
+One renderer is shared, so one 3D view is traced at a time.
 
 ## How it is built
 
@@ -102,7 +125,8 @@ src/app/
   dock/            the docking UI: stacks, splits, floating windows, dragging
   ui/              menus, dialogs, theme
   panels/          the sample panels, their registry and the layout presets
-  scene/           SceneDocument, the shared three.js scene, and model import
+  scene/           SceneDocument, the shared three.js scene, and model import, including IFC
+  raytrace/        RaytraceService and its web worker, running MeerCADRaytracer
   workbench/       the page: menu bar, toolbar, workspace and status bar
 ```
 
@@ -116,4 +140,5 @@ src/app/
 - **Angular** 22.2, standalone, zoneless, with signals.
 - **TypeScript** 6.0. This is the newest version Angular 22 supports; TypeScript 7 isn't supported yet.
 - **three.js** 0.187.
+- **MeerCADRaytracer** and **MeerCADIFCImport**, pinned to commits, as in SceneEditor.
 - **Vitest** 5, for the unit tests.

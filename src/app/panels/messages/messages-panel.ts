@@ -3,11 +3,12 @@ import { DatePipe } from '@angular/common';
 import { BusMessage, CHANNELS, PanelBus, channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { LayoutService } from '../../core/layout/layout.service';
+import { SelectValue } from '../../ui/select-value';
 
 /** The messages panels send each other, newest last. */
 @Component({
   selector: 'app-messages-panel',
-  imports: [DatePipe],
+  imports: [SelectValue, DatePipe],
   host: { class: 'messages-panel' },
   template: `
     <div class="panel-toolbar">
@@ -18,7 +19,7 @@ import { LayoutService } from '../../core/layout/layout.service';
         aria-label="Filter messages"
         [value]="filter()"
         (input)="panel.setState({ filter: $any($event.target).value })" />
-      <select class="input" aria-label="Channel" [value]="channelFilter()" (change)="panel.setState({ channel: $any($event.target).value })">
+      <select class="input" aria-label="Channel" [appSelectValue]="channelFilter()" (change)="panel.setState({ channel: $any($event.target).value })">
         <option value="">All channels</option>
         @for (c of channels; track c.id) {
           <option [value]="c.id">{{ c.label }}</option>

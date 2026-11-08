@@ -1,8 +1,10 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { ToolMode, channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
-import { MODEL_EXTENSIONS, importModel } from '../../scene/model-import';
+import { MODEL_EXTENSIONS } from '../../scene/model-import';
+import { ModelImportService } from '../../scene/model-import.service';
 import { PrimitiveKind, SceneDocument } from '../../scene/scene-document';
+import { SelectValue } from '../../ui/select-value';
 
 const MODES: { mode: ToolMode; label: string; icon: string; key: string }[] = [
   { mode: 'select', label: 'Select', icon: '↖', key: 'Q' },
@@ -28,6 +30,7 @@ const PRIMITIVES: { kind: PrimitiveKind; label: string; icon: string }[] = [
  * shapes and models, and commands on the selection.
  */
 @Component({
+  imports: [SelectValue],
   selector: 'app-tools-panel',
   host: { class: 'tools-panel' },
   template: `
@@ -56,7 +59,7 @@ const PRIMITIVES: { kind: PrimitiveKind; label: string; icon: string }[] = [
         <label class="check"><input type="checkbox" [checked]="space() === 'local'" (change)="setTool({ space: checked($event) ? 'local' : 'world' })" /> Local axes</label>
         <label class="check"><input type="checkbox" [checked]="snap() !== null" (change)="setTool({ snap: checked($event) ? 0.25 : null })" /> Snap</label>
         @if (snap() !== null) {
-          <select class="input" aria-label="Snap step" [value]="'' + snap()" (change)="setTool({ snap: +value($event) })">
+          <select class="input" aria-label="Snap step" [appSelectValue]="snap()" (change)="setTool({ snap: +value($event) })">
             @for (s of snaps; track s) {
               <option [value]="'' + s">{{ s }}</option>
             }
@@ -120,6 +123,7 @@ export class ToolsPanel {
     { view: 'right', label: 'Right' },
   ] as const;
   protected readonly accept = MODEL_EXTENSIONS.join(',');
+  private readonly importer = inject(ModelImportService);
   protected readonly status = signal('');
 
   protected readonly channel = computed(() => channelInfo(this.panel.channel()));
@@ -180,21 +184,9 @@ export class ToolsPanel {
     const input = event.target as HTMLInputElement;
     const files = [...(input.files ?? [])];
     input.value = '';
-    const ids: string[] = [];
-    for (const file of files) {
-      this.status.set(`Reading ${file.name}…`);
-      try {
-        ids.push(this.doc.addObject(await importModel(file)));
-      } catch (e) {
-        this.status.set(`${file.name}: ${(e as Error).message}`);
-        return;
-      }
-    }
-    this.status.set(ids.length ? `Imported ${files.map(f => f.name).join(', ')}.` : '');
-    if (ids.length) {
-      this.select(ids);
-      this.panel.publish('viewport.command', { action: 'fit', ids });
-    }
+    // Selected and framed on this panel's link.
+    await this.importer.importFiles(files, this.panel.channelKey());
+    this.status.set(this.importer.status());
   }
 
   protected value(event: Event): string {

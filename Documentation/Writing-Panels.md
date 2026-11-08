@@ -49,6 +49,7 @@ It then appears in the Panels menu and a stack's ＋ menu, and can be used in la
 | `type` | The name used in layouts. Keep it stable, as saved layouts refer to it. |
 | `multiple` | `false` for panels that make sense once, such as Panels & Links. Adding a second shows the first instead. |
 | `defaultState` | Optional. A function giving a new panel's state. |
+| `float` | Optional. `{ width, height }`: a panel added without a target opens in a floating window of this size, like a dialog box, instead of a tab in the largest stack. The Ray Tracing panel uses it. |
 
 ## PanelContext
 
