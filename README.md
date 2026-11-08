@@ -11,6 +11,8 @@ A workbench of panels in one browser page, built with Angular 22 and three.js. P
 
 The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, a message log, and a list of panels and their links.
 
+**Try it:** [vjigouline.github.io/gui-experimental](https://vjigouline.github.io/gui-experimental/)
+
 ![The default layout: scene tree, 3D view, properties and tools, with messages below](Documentation/workbench.png)
 
 ## Running it
@@ -20,9 +22,12 @@ npm install
 npm start          # http://localhost:4200/
 npm test           # unit tests, with Vitest
 npm run build      # production build in dist/
+npm run deploy     # build and publish to GitHub Pages
 ```
 
 It needs Node.js 22.22, 24.15, or 26 and later, as Angular 22 does. The page needs a browser with WebGL.
+
+`npm run deploy` builds the app for the `/gui-experimental/` path and pushes it to the `gh-pages` branch, which GitHub Pages serves. Changes appear on the site a minute or so later.
 
 ## Arranging panels
 
