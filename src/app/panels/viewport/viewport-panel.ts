@@ -91,7 +91,7 @@ export const BACKGROUNDS = [
         class="tool-btn"
         [class.on]="walking()"
         [attr.aria-pressed]="walking()"
-        title="Walk: WASD to move, Q/E down and up, drag to look, Shift to run, wheel for speed (G switches, Esc leaves)"
+        title="Walk: WASD to move, Q/E down and up, drag to look, middle-drag to walk sideways and up or down, wheel to walk forward and back, Shift to run, Ctrl+wheel for speed (G switches, Esc leaves)"
         (click)="setWalking(!walking())">
         🚶 Walk
       </button>
@@ -114,7 +114,7 @@ export const BACKGROUNDS = [
       } @else if (zoomBox()) {
         Zoom box · drag a rectangle to zoom to it, or click to zoom in · Esc cancels
       } @else if (walking()) {
-        Walk · WASD move · Q/E down, up · drag to look · Shift run · {{ walkSpeedLabel() }} · Esc leaves
+        Walk · WASD move · Q/E down, up · drag to look · middle-drag sideways, up · wheel forward, back · Shift run · Ctrl+wheel {{ walkSpeedLabel() }} · Esc leaves
       } @else {
         {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected
       }
@@ -262,6 +262,7 @@ export class ViewportPanel {
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('dblclick', this.onDoubleClick);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    canvas.addEventListener('mousedown', this.onMouseDown);
 
     this.resizeObserver.observe(container);
     this.updateGizmo(this.mode(), this.selection()?.ids, this.tool());
@@ -297,6 +298,7 @@ export class ViewportPanel {
 
   private dispose(): void {
     this.stopWalking();
+    clearTimeout(this.wheelSave);
     this.raytrace?.unregister(this.panel.id);
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
@@ -505,6 +507,16 @@ export class ViewportPanel {
       return;
     }
     if (this.walking() && !this.pointerDown.onGizmo && e.button === 0) this.startLook(e);
+    if (this.walking() && e.button === 1) {
+      // Not the browser's autoscroll: the middle button walks sideways and up or down.
+      e.preventDefault();
+      this.startSideWalk(e);
+    }
+  };
+
+  /** Stops the middle button's autoscroll while walking. */
+  private readonly onMouseDown = (e: MouseEvent) => {
+    if (this.walking() && e.button === 1) e.preventDefault();
   };
 
   private readonly onPointerUp = (e: PointerEvent) => {
@@ -725,13 +737,28 @@ export class ViewportPanel {
     this.walkFrame = requestAnimationFrame(step);
   }
 
-  /** Moves the camera for the keys held: over the ground plane, and up or down. */
-  private walkStep(dt: number): void {
-    const k = this.walkKeys;
+  /** The level direction the camera faces, and its right, for walking. */
+  private walkAxes(): { forward: THREE.Vector3; right: THREE.Vector3 } {
     const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0);
     if (forward.lengthSq() < 1e-8) forward.set(0, 1, 0).applyQuaternion(this.camera.quaternion).setY(0);
     forward.normalize();
     const right = new THREE.Vector3().crossVectors(forward, this.camera.up).normalize();
+    return { forward, right };
+  }
+
+  /** Moves the camera, and the orbit centre with it, while walking. */
+  private walkBy(move: THREE.Vector3): void {
+    if (move.lengthSq() === 0) return;
+    if (this.view() !== 'custom') this.panel.setState({ view: 'custom' });
+    this.camera.position.add(move);
+    this.orbit?.target.add(move);
+    this.requestRender();
+  }
+
+  /** Moves the camera for the keys held: over the ground plane, and up or down. */
+  private walkStep(dt: number): void {
+    const k = this.walkKeys;
+    const { forward, right } = this.walkAxes();
     const move = new THREE.Vector3();
     if (k.has('KeyW') || k.has('ArrowUp')) move.add(forward);
     if (k.has('KeyS') || k.has('ArrowDown')) move.sub(forward);
@@ -742,9 +769,39 @@ export class ViewportPanel {
     if (move.lengthSq() === 0) return;
     const run = k.has('ShiftLeft') || k.has('ShiftRight') ? 3 : 1;
     move.normalize().multiplyScalar(this.baseWalkSpeed() * this.walkSpeed() * run * dt);
-    this.camera.position.add(move);
-    this.orbit?.target.add(move);
-    this.requestRender();
+    this.walkBy(move);
+  }
+
+  /**
+   * Dragging with the middle button walks the way the mouse moves: left and right, and up and
+   * down. 400 pixels go as far as a second of walking; Shift runs.
+   */
+  private startSideWalk(e: PointerEvent): void {
+    const canvas = e.currentTarget as HTMLElement;
+    canvas.setPointerCapture?.(e.pointerId);
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - lastX;
+      const dy = ev.clientY - lastY;
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (!dx && !dy) return;
+      moved = true;
+      const step = (this.baseWalkSpeed() * this.walkSpeed() * (ev.shiftKey ? 3 : 1)) / 400;
+      const { right } = this.walkAxes();
+      this.walkBy(right.multiplyScalar(dx * step).add(new THREE.Vector3(0, -dy * step, 0)));
+    };
+    const end = () => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', end);
+      canvas.removeEventListener('pointercancel', end);
+      if (moved) this.saveCamera();
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
   }
 
   /** Dragging turns the camera on the spot, keeping it level. */
@@ -785,13 +842,28 @@ export class ViewportPanel {
     canvas.addEventListener('pointercancel', end);
   }
 
-  /** In walk mode, the wheel changes walking speed. */
+  /**
+   * In walk mode, the wheel walks forward and back, a quarter of a second of walking a notch
+   * (Shift runs). Ctrl+wheel changes the walking speed.
+   */
   private readonly onWheel = (e: WheelEvent) => {
     if (!this.walking()) return;
     e.preventDefault();
-    const speed = Math.min(Math.max(this.walkSpeed() * (e.deltaY < 0 ? 1.25 : 0.8), 0.05), 50);
-    this.panel.setState({ walkSpeed: Math.round(speed * 1000) / 1000 });
+    if (!e.deltaY) return;
+    if (e.ctrlKey || e.metaKey) {
+      const speed = Math.min(Math.max(this.walkSpeed() * (e.deltaY < 0 ? 1.25 : 0.8), 0.05), 50);
+      this.panel.setState({ walkSpeed: Math.round(speed * 1000) / 1000 });
+      return;
+    }
+    // Notches, from pixels, lines or pages; a touchpad's small steps move a little.
+    const unit = e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 10 : e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 / 3 : 1 / 100;
+    const notches = Math.max(-5, Math.min(5, -e.deltaY * unit));
+    const distance = this.baseWalkSpeed() * this.walkSpeed() * (e.shiftKey ? 3 : 1) * 0.25 * notches;
+    this.walkBy(this.walkAxes().forward.multiplyScalar(distance));
+    clearTimeout(this.wheelSave);
+    this.wheelSave = setTimeout(() => this.saveCamera(), 300);
   };
+  private wheelSave: ReturnType<typeof setTimeout> | undefined;
 }
 
 /** Keys that move the camera in walk mode, by `KeyboardEvent.code`, so they work on any keyboard layout. */
