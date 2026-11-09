@@ -398,7 +398,8 @@ export class ViewportPanel {
     if (box.isEmpty()) box = this.doc.bounds();
     if (box.isEmpty()) box = new THREE.Box3(new THREE.Vector3(-1, 0, -1), new THREE.Vector3(1, 1, 1));
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const radius = Math.max(sphere.radius, 0.1);
+    // Small parts, such as a screw in metres, fill the view too.
+    const radius = Math.max(sphere.radius, 1e-4);
     const fov = THREE.MathUtils.degToRad(this.camera.fov);
     const fit = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * this.camera.aspect));
     const distance = (radius / Math.sin(fit / 2)) * 1.1;
@@ -407,7 +408,7 @@ export class ViewportPanel {
     if (dir.lengthSq() === 0) dir.set(1, 0.8, 1).normalize();
     this.orbit?.target.copy(sphere.center);
     this.camera.position.copy(sphere.center).addScaledVector(dir, distance);
-    this.camera.near = Math.max(distance / 1000, 0.001);
+    this.camera.near = Math.max(distance / 1000, 1e-6);
     this.camera.far = distance * 100;
     this.camera.updateProjectionMatrix();
     this.orbit?.update();
