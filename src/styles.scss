@@ -975,6 +975,18 @@ body.resizing-row canvas {
   }
 }
 
+.viewport-canvas.zoom-box {
+  cursor: crosshair;
+}
+
+.zoom-rect {
+  position: absolute;
+  z-index: 1;
+  border: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+
 .viewport-info {
   position: absolute;
   bottom: 6px;

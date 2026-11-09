@@ -46,16 +46,30 @@ export const BACKGROUNDS = [
       class="viewport-canvas"
       #container
       tabindex="0"
-      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; G to walk; L for face loops; Z to ray trace; Delete to remove."
+      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; B to zoom to a box; G to walk; L for face loops; Z to ray trace; Delete to remove."
+      [class.zoom-box]="zoomBox()"
       (keydown)="onKey($event)"
       (keyup)="onKeyUp($event)"
       (blur)="stopWalking()"></div>
+    @if (zoomRect(); as r) {
+      <div class="zoom-rect" [style.left.px]="r.x" [style.top.px]="r.y" [style.width.px]="r.w" [style.height.px]="r.h"></div>
+    }
     @if (error()) {
       <div class="panel-empty">{{ error() }}</div>
     }
     <div class="viewport-toolbar">
       <button type="button" class="tool-btn" title="View direction" (click)="openViews($event)">{{ viewLabel() }} ▾</button>
       <button type="button" class="tool-btn" title="Fit the selection, or everything (F)" (click)="fit()">⤢ Fit</button>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="zoomBox()"
+        [attr.aria-pressed]="zoomBox()"
+        [disabled]="walking()"
+        title="Zoom box: drag a rectangle to zoom to it, or click to zoom in there (B; Esc cancels)"
+        (click)="setZoomBox(!zoomBox())">
+        ⊕ Zoom
+      </button>
       <span class="tool-sep"></span>
       <button type="button" class="tool-btn" [class.on]="grid()" title="Grid" (click)="toggle('grid')">#</button>
       <button type="button" class="tool-btn" [class.on]="axes()" title="Axes" (click)="toggle('axes')">⊹</button>
@@ -97,6 +111,8 @@ export const BACKGROUNDS = [
     <div class="viewport-info">
       @if (tracing()) {
         Ray traced · {{ traceStatus() }}
+      } @else if (zoomBox()) {
+        Zoom box · drag a rectangle to zoom to it, or click to zoom in · Esc cancels
       } @else if (walking()) {
         Walk · WASD move · Q/E down, up · drag to look · Shift run · {{ walkSpeedLabel() }} · Esc leaves
       } @else {
@@ -121,6 +137,10 @@ export class ViewportPanel {
   /** Show the boundary loops of B-rep faces and surfaces, where the scene has them. */
   protected readonly loops = this.panel.state('loops', true);
   protected readonly hasLoops = computed(() => this.doc.faceLoops().length > 0);
+  /** Zoom box: the next left drag draws a rectangle that the view zooms to. Not kept. */
+  protected readonly zoomBox = signal(false);
+  /** The rectangle being drawn, in pixels in the view. */
+  protected readonly zoomRect = signal<{ x: number; y: number; w: number; h: number } | null>(null);
   /** Walk mode: WASD moves the camera, dragging looks around. */
   protected readonly walking = this.panel.state('walk', false);
   /** Walking speed, as a multiple of the speed for the scene's size. */
@@ -478,6 +498,12 @@ export class ViewportPanel {
   private readonly onPointerDown = (e: PointerEvent) => {
     this.containerRef().nativeElement.focus({ preventScroll: true });
     this.pointerDown = { x: e.clientX, y: e.clientY, onGizmo: !!this.gizmo?.object && this.gizmo.axis !== null };
+    if (this.zoomBox() && !this.pointerDown.onGizmo && e.button === 0) {
+      // Not a selection click: the rectangle has the pointer until it is let go.
+      this.pointerDown = null;
+      this.startZoomBox(e);
+      return;
+    }
     if (this.walking() && !this.pointerDown.onGizmo && e.button === 0) this.startLook(e);
   };
 
@@ -541,12 +567,103 @@ export class ViewportPanel {
       this.panel.publish('selection', { ids: [] }, true);
     } else if (key === 'z' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && this.raytrace) {
       this.raytrace.toggleView(this.panel.id);
+    } else if (key === 'b' && plain && !e.repeat && !this.walking()) {
+      this.setZoomBox(!this.zoomBox());
+    } else if (key === 'escape' && this.zoomBox()) {
+      this.setZoomBox(false);
     } else if (key === 'escape') {
       this.panel.publish('selection', { ids: [] }, true);
     } else {
       return;
     }
     e.preventDefault();
+  }
+
+  // ------------------------------------------------------------ zoom box
+
+  /** Arms or cancels the zoom box. Orbiting is off while it is armed, so dragging draws. */
+  protected setZoomBox(on: boolean): void {
+    this.zoomBox.set(on);
+    this.zoomRect.set(null);
+    if (this.orbit) this.orbit.enabled = !on && !this.walking();
+    if (on) this.containerRef().nativeElement.focus({ preventScroll: true });
+  }
+
+  private startZoomBox(e: PointerEvent): void {
+    const canvas = e.currentTarget as HTMLElement;
+    canvas.setPointerCapture?.(e.pointerId);
+    const origin = canvas.getBoundingClientRect();
+    const x0 = e.clientX - origin.left;
+    const y0 = e.clientY - origin.top;
+    const move = (ev: PointerEvent) => {
+      const x1 = ev.clientX - origin.left;
+      const y1 = ev.clientY - origin.top;
+      this.zoomRect.set({ x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) });
+    };
+    const end = (ev: PointerEvent) => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', end);
+      canvas.removeEventListener('pointercancel', end);
+      const rect = this.zoomRect();
+      this.setZoomBox(false);
+      if (ev.type === 'pointercancel') return;
+      if (rect && rect.w > 4 && rect.h > 4) {
+        this.zoomTo(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w, rect.h, origin.width, origin.height);
+      } else {
+        // A click zooms in twice, about the point clicked.
+        this.zoomTo(x0, y0, origin.width / 2, origin.height / 2, origin.width, origin.height);
+      }
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+  }
+
+  /**
+   * Zooms so that a w x h pixel rectangle centred at (x, y) fills the view, keeping the view
+   * direction. The new centre is what is under the rectangle: the surface under its centre, or
+   * else the nearest one elsewhere in it, or, with nothing there, a point as far as the orbit
+   * centre.
+   */
+  private zoomTo(x: number, y: number, w: number, h: number, width: number, height: number): void {
+    if (!width || !height) return;
+    const ndc = (px: number, py: number) => new THREE.Vector2((px / width) * 2 - 1, -(py / height) * 2 + 1);
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    const target = this.orbit?.target ?? new THREE.Vector3();
+    let depth = this.depthAt(ndc(x, y), forward);
+    if (depth === null) {
+      for (let i = 0; i < 5; i++) {
+        for (let j = 0; j < 5; j++) {
+          const d = this.depthAt(ndc(x - w / 2 + (w * (i + 0.5)) / 5, y - h / 2 + (h * (j + 0.5)) / 5), forward);
+          if (d !== null && (depth === null || d < depth)) depth = d;
+        }
+      }
+    }
+    depth ??= Math.max(target.clone().sub(this.camera.position).dot(forward), 1e-4);
+    // The point at that depth under the box's centre becomes the new centre, and the camera
+    // closes in by the box's share of the view.
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc(x, y), this.camera);
+    const centre = ray.ray.at(depth / Math.max(ray.ray.direction.dot(forward), 1e-6), new THREE.Vector3());
+    const share = Math.min(Math.max(w / width, h / height), 1);
+    const distance = Math.max(depth * share, 1e-6);
+    this.camera.position.copy(centre).addScaledVector(forward, -distance);
+    this.orbit?.target.copy(centre);
+    this.camera.near = Math.min(this.camera.near, Math.max(distance / 1000, 1e-6));
+    this.camera.updateProjectionMatrix();
+    this.orbit?.update();
+    this.saveCamera();
+    this.requestRender();
+  }
+
+  /** Distance along `forward` to the first visible surface at a point in the view, or null. */
+  private depthAt(ndc: THREE.Vector2, forward: THREE.Vector3): number | null {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const hit = ray
+      .intersectObjects(this.doc.scene.children, true)
+      .find(h => isShown(h.object) && (h.object as THREE.Mesh).isMesh);
+    return hit ? hit.point.clone().sub(this.camera.position).dot(forward) : null;
   }
 
   // ------------------------------------------------------------ walking
@@ -557,6 +674,7 @@ export class ViewportPanel {
 
   /** Turns walk mode on or off. Orbiting is off while walking. */
   protected setWalking(on: boolean): void {
+    if (on && this.zoomBox()) this.setZoomBox(false);
     if (!on) this.stopWalking();
     if (this.orbit) {
       this.orbit.enabled = !on;

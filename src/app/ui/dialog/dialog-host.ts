@@ -248,6 +248,7 @@ import { DialogRequest, DialogService } from './dialog.service';
               <li>Drag to orbit, right-drag to pan, scroll to zoom. Click to select; <kbd>Shift</kbd>+click to add.</li>
               <li><kbd>Q</kbd> select, <kbd>W</kbd> move, <kbd>E</kbd> rotate, <kbd>R</kbd> scale, <kbd>F</kbd> fit, <kbd>Delete</kbd> remove, <kbd>Esc</kbd> deselect.</li>
               <li><kbd>G</kbd>, or 🚶 Walk, walks through the scene: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrows move, <kbd>Q</kbd>/<kbd>E</kbd> go down and up, drag to look, hold <kbd>Shift</kbd> to run, and the wheel sets the speed. <kbd>Esc</kbd> or <kbd>G</kbd> goes back to orbiting.</li>
+              <li><kbd>B</kbd>, or ⊕ Zoom, zooms to a box: drag a rectangle round what to look at, or click to zoom in there. <kbd>Esc</kbd> cancels.</li>
               <li><kbd>L</kbd>, or ⬚, shows or hides face loops: the edges of solid faces and surfaces in STEP models.</li>
               <li><kbd>Z</kbd> switches to the ray traced image and back.</li>
             </ul>
