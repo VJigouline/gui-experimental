@@ -3,13 +3,15 @@ import { DatePipe } from '@angular/common';
 import { LayoutService } from '../../core/layout/layout.service';
 import { LayoutError } from '../../core/layout/layout.parse';
 import { IfcImportSettings, defaultIfcSettings } from '../../scene/ifc-settings';
+import { STEP_QUALITY, StepImportSettings, defaultStepSettings } from '../../scene/step-settings';
+import { SelectValue } from '../select-value';
 import { downloadText, readTextFile } from '../files';
 import { DialogRequest, DialogService } from './dialog.service';
 
 /** Draws the open dialog as a modal `<dialog>`. */
 @Component({
   selector: 'app-dialog-host',
-  imports: [DatePipe],
+  imports: [DatePipe, SelectValue],
   template: `
     <dialog #dialog class="dialog" [class.wide]="wide()" (cancel)="cancel($event)" (close)="onClosed()">
       @switch (request()?.kind) {
@@ -82,6 +84,65 @@ import { DialogRequest, DialogService } from './dialog.service';
             </label>
             <div class="dialog-buttons">
               <button type="button" class="btn" (click)="ifc.set({ ...defaults(), ask: ifc().ask })">Defaults</button>
+              <span class="spacer"></span>
+              <button type="button" class="btn" (click)="close()">Cancel</button>
+              <button type="submit" class="btn primary" autofocus>{{ r.settingsOnly ? 'Save' : 'Import' }}</button>
+            </div>
+          </form>
+        }
+        @case ('step-options') {
+          @let r = asStep();
+          @let o = step();
+          <form class="ifc-dialog" (submit)="submitStep($event)">
+            <h2>{{ r.settingsOnly ? 'STEP import settings' : 'Import STEP' }}</h2>
+            @if (!r.settingsOnly) {
+              <p class="hint">{{ r.files.join(', ') }}</p>
+            }
+            <div class="props">
+              <fieldset>
+                <legend>Tessellation</legend>
+                <label class="field" title="How far the mesh may be from the surface, as a share of each solid's size. Finer gives smoother curves and more triangles.">
+                  <span>Quality</span>
+                  <select class="input" [appSelectValue]="o.relativeTolerance" (change)="setStep({ relativeTolerance: num($event) })">
+                    @for (q of stepQuality; track q.value) {
+                      <option [value]="q.value">{{ q.name }}</option>
+                    }
+                    @if (!isStepQuality(o.relativeTolerance)) {
+                      <option [value]="o.relativeTolerance">Custom ({{ o.relativeTolerance * 100 }}%)</option>
+                    }
+                  </select>
+                </label>
+                <label class="field" title="Largest angle between neighbouring normals, and per segment along curved edges.">
+                  <span>Angle</span>
+                  <span class="range"><input type="range" min="2" max="30" step="0.5" [value]="o.angularTolerance" (input)="setStep({ angularTolerance: num($event) })" /><output>{{ o.angularTolerance }}°</output></span>
+                </label>
+                <label class="field" title="Refinement stops at this many triangles in one face.">
+                  <span>Face limit</span>
+                  <select class="input" [appSelectValue]="o.maxTrianglesPerFace" (change)="setStep({ maxTrianglesPerFace: num($event) })">
+                    @for (n of faceLimits; track n) {
+                      <option [value]="n">{{ n.toLocaleString() }} triangles</option>
+                    }
+                  </select>
+                </label>
+              </fieldset>
+              <fieldset>
+                <legend>Content</legend>
+                <label class="field" title="Draw items that the file hides with INVISIBILITY.">
+                  <span>Hidden</span>
+                  <span class="check"><input type="checkbox" [checked]="o.includeHidden" (change)="setStep({ includeHidden: checked($event) })" /> Include hidden items</span>
+                </label>
+                <label class="field" title="Where a product has both a B-rep and an AP242 tessellated shape, draw the tessellated one.">
+                  <span>AP242</span>
+                  <span class="check"><input type="checkbox" [checked]="o.preferTessellated" (change)="setStep({ preferTessellated: checked($event) })" /> Prefer tessellated shapes</span>
+                </label>
+              </fieldset>
+            </div>
+            <label class="check ask">
+              <input type="checkbox" [checked]="o.ask" (change)="setStep({ ask: checked($event) })" />
+              Ask before each STEP import (File › STEP import settings… changes these later)
+            </label>
+            <div class="dialog-buttons">
+              <button type="button" class="btn" (click)="step.set({ ...stepDefaults(), ask: step().ask })">Defaults</button>
               <span class="spacer"></span>
               <button type="button" class="btn" (click)="close()">Cancel</button>
               <button type="submit" class="btn primary" autofocus>{{ r.settingsOnly ? 'Save' : 'Import' }}</button>
@@ -214,6 +275,14 @@ export class DialogHost {
   /** The IFC settings being edited. */
   protected readonly ifc = signal<IfcImportSettings>(defaultIfcSettings());
   protected readonly defaults = defaultIfcSettings;
+  /** The STEP settings being edited. */
+  protected readonly step = signal<StepImportSettings>(defaultStepSettings());
+  protected readonly stepDefaults = defaultStepSettings;
+  protected readonly stepQuality = STEP_QUALITY;
+  protected readonly faceLimits = [10000, 50000, 200000, 1000000];
+  protected isStepQuality(v: number): boolean {
+    return STEP_QUALITY.some(q => q.value === v);
+  }
   protected readonly json = signal('');
   protected readonly jsonError = signal('');
   protected readonly saveName = signal('');
@@ -233,6 +302,7 @@ export class DialogHost {
         this.jsonError.set('');
         if (r.kind === 'prompt') this.promptValue.set(r.value);
         if (r.kind === 'ifc-options') this.ifc.set({ ...r.settings });
+        if (r.kind === 'step-options') this.step.set({ ...r.settings });
         if (r.kind === 'layout-json') this.json.set(this.layout.toJson());
         if (r.kind === 'layouts') this.saveName.set(this.layout.layout().name ?? '');
         if (!d.open) d.showModal();
@@ -250,6 +320,9 @@ export class DialogHost {
   }
   protected asIfc() {
     return this.request() as Extract<DialogRequest, { kind: 'ifc-options' }>;
+  }
+  protected asStep() {
+    return this.request() as Extract<DialogRequest, { kind: 'step-options' }>;
   }
   protected asBusy() {
     return this.request() as Extract<DialogRequest, { kind: 'busy' }>;
@@ -274,11 +347,12 @@ export class DialogHost {
     if (this.request()) this.close();
   }
 
-  private settle(answer?: string | boolean | IfcImportSettings): void {
+  private settle(answer?: string | boolean | IfcImportSettings | StepImportSettings): void {
     if (this.settled) return;
     this.settled = true;
     const r = this.request();
-    if (r?.kind === 'ifc-options') r.resolve(typeof answer === 'object' ? answer : null);
+    if (r?.kind === 'ifc-options') r.resolve(typeof answer === 'object' ? (answer as IfcImportSettings) : null);
+    else if (r?.kind === 'step-options') r.resolve(typeof answer === 'object' ? (answer as StepImportSettings) : null);
     else if (r?.kind === 'prompt') r.resolve(typeof answer === 'string' ? answer : null);
     else if (r?.kind === 'confirm') r.resolve(answer === true);
     else if (r?.kind === 'message') r.resolve();
@@ -299,6 +373,16 @@ export class DialogHost {
   protected submitIfc(event: Event): void {
     event.preventDefault();
     this.settle(this.ifc());
+    this.dialogs.close();
+  }
+
+  protected setStep(patch: Partial<StepImportSettings>): void {
+    this.step.update(s => ({ ...s, ...patch }));
+  }
+
+  protected submitStep(event: Event): void {
+    event.preventDefault();
+    this.settle(this.step());
     this.dialogs.close();
   }
 

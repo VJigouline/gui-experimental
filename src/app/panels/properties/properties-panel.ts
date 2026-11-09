@@ -21,6 +21,7 @@ interface Props {
   geometry: { vertices: number; triangles: number } | null;
   children: number;
   ifc: IfcInfo | null;
+  step: { label: string; value: string }[] | null;
 }
 
 /** What MeerCADIFCImport puts in an object's userData.ifc, formatted for display. */
@@ -92,6 +93,15 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
                   <div class="field"><span [title]="row.label">{{ row.label }}</span><span class="value" [title]="row.value">{{ row.value }}</span></div>
                 }
               </details>
+            }
+          </fieldset>
+        }
+
+        @if (p.step; as rows) {
+          <fieldset class="ifc-props">
+            <legend>STEP</legend>
+            @for (row of rows; track row.label) {
+              <div class="field"><span>{{ row.label }}</span><span class="value" [title]="row.value">{{ row.value }}</span></div>
             }
           </fieldset>
         }
@@ -208,6 +218,7 @@ export class PropertiesPanel {
         : null,
       children: o.children.length,
       ifc: ifcInfo(o.userData['ifc']),
+      step: stepInfo(o.userData['step']),
     };
   });
 
@@ -267,4 +278,27 @@ function format(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+const STEP_KINDS: Record<string, string> = { product: 'Part or assembly', instance: 'Placed instance', shape: 'Shape' };
+
+/** What MeerCADStepImport puts in an object's userData.step, as label and value rows. */
+function stepInfo(data: unknown): { label: string; value: string }[] | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  const rows: { label: string; value: string }[] = [];
+  const add = (label: string, value: unknown) => {
+    const v = format(value);
+    if (v) rows.push({ label, value: v });
+  };
+  add('Kind', STEP_KINDS[String(d['kind'])] ?? d['kind']);
+  add('Product', d['productName']);
+  add('Product ID', d['productId']);
+  add('Description', d['description']);
+  add('Shape item', d['itemType']);
+  add('Item', typeof d['itemId'] === 'number' ? `#${d['itemId']}` : null);
+  add('Style', typeof d['style'] === 'object' && d['style'] ? (d['style'] as { name?: string }).name : d['style']);
+  add('Definition', typeof d['productDefinition'] === 'number' ? `#${d['productDefinition']}` : null);
+  add('Occurrence', typeof d['occurrence'] === 'number' ? `#${d['occurrence']}` : null);
+  return rows;
 }

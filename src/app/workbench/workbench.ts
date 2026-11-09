@@ -124,6 +124,7 @@ export class Workbench {
         { label: 'New scene', icon: '✚', action: () => this.newScene() },
         { label: 'Import model…', icon: '⇪', hint: MODEL_EXTENSIONS.join(', '), action: () => this.modelInput().nativeElement.click() },
         { label: 'IFC import settings…', icon: '⚙', action: () => this.importer.editIfcSettings() },
+        { label: 'STEP import settings…', icon: '⚙', action: () => this.importer.editStepSettings() },
         'separator',
         { label: 'Open layout file…', icon: '📂', action: () => this.openLayoutFile() },
         { label: 'Download layout…', icon: '⇩', action: () => this.downloadLayout() },

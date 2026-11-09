@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { IfcImportSettings } from './ifc-settings';
+import { StepImportSettings } from './step-settings';
 
 /** File extensions that `importModel` reads. */
-export const MODEL_EXTENSIONS = ['.glb', '.gltf', '.stl', '.obj', '.ifc'] as const;
+export const MODEL_EXTENSIONS = ['.glb', '.gltf', '.stl', '.obj', '.ifc', '.stp', '.step', '.p21', '.stpz'] as const;
+
+/** STEP files, including gzip-compressed `.stpz`. */
+export const STEP_EXTENSIONS = ['.stp', '.step', '.p21', '.stpz'];
 
 export interface ImportedModel {
   object: THREE.Object3D;
@@ -17,15 +21,19 @@ export function extensionOf(name: string): string {
   return i < 0 ? '' : name.slice(i).toLowerCase();
 }
 
+export function isStepFile(name: string): boolean {
+  return STEP_EXTENSIONS.includes(extensionOf(name));
+}
+
 export function isModelFile(name: string): boolean {
   return (MODEL_EXTENSIONS as readonly string[]).includes(extensionOf(name));
 }
 
 /**
- * Reads a glTF (self-contained `.gltf` or `.glb`), STL, OBJ or IFC file into an object named
+ * Reads a glTF (self-contained `.gltf` or `.glb`), STL, OBJ, IFC or STEP file into an object named
  * after the file. The readers are fetched when first needed.
  */
-export async function importModel(file: File, ifc?: IfcImportSettings): Promise<ImportedModel> {
+export async function importModel(file: File, ifc?: IfcImportSettings, step?: StepImportSettings): Promise<ImportedModel> {
   const ext = extensionOf(file.name);
   const name = file.name.replace(/\.[^.]+$/, '');
   let object: THREE.Object3D;
@@ -72,6 +80,27 @@ export async function importModel(file: File, ifc?: IfcImportSettings): Promise<
       warnings = result.warnings;
       const s = result.statistics;
       summary = `${result.schema.id}: ${s.products} products, ${s.triangles.toLocaleString()} triangles in ${Math.round(s.milliseconds)} ms`;
+      break;
+    }
+    case '.stp':
+    case '.step':
+    case '.p21':
+    case '.stpz': {
+      // AP203, AP214, AP242 and others, with MeerCADStepImport, as in SceneEditor.
+      // .stpz is gzip-compressed; loadStepAsync inflates it.
+      const { loadStepAsync } = await import('meercad-step-import');
+      const result = await loadStepAsync(await file.arrayBuffer(), {
+        relativeTolerance: step?.relativeTolerance,
+        angularTolerance: step ? (step.angularTolerance * Math.PI) / 180 : undefined,
+        maxTrianglesPerFace: step?.maxTrianglesPerFace,
+        includeHidden: step?.includeHidden,
+        preferTessellated: step?.preferTessellated,
+      });
+      object = result.group;
+      warnings = result.warnings;
+      const s = result.stats;
+      const failed = s.failedFaces ? `, ${s.failedFaces} faces failed` : '';
+      summary = `${result.schema.protocol}, ${result.lengthUnitName}: ${s.products} products, ${s.faces.toLocaleString()} faces, ${s.triangles.toLocaleString()} triangles${failed}`;
       break;
     }
     default:

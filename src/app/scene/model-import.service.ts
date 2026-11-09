@@ -2,13 +2,14 @@ import { Injectable, inject, signal } from '@angular/core';
 import { PanelBus } from '../core/bus/panel-bus';
 import { DialogService } from '../ui/dialog/dialog.service';
 import { IfcImportSettings, readIfcSettings, writeIfcSettings } from './ifc-settings';
-import { extensionOf, importModel, isModelFile, MODEL_EXTENSIONS } from './model-import';
+import { extensionOf, importModel, isModelFile, isStepFile, MODEL_EXTENSIONS } from './model-import';
+import { StepImportSettings, readStepSettings, writeStepSettings } from './step-settings';
 import { SceneDocument } from './scene-document';
 
 /**
  * Imports model files into the scene from the toolbar, the File menu, the Edit Tools panel, or
  * files dropped on the workbench, as SceneEditor does:
- * - IFC files first show the IFC import dialog, unless it is set not to ask;
+ * - IFC and STEP files first show their import dialog, unless it is set not to ask;
  * - a busy dialog shows while files are read, as the readers run in the page;
  * - a file that can't be read shows a Failure dialog, and the others still import;
  * - warnings go to the browser console;
@@ -23,6 +24,12 @@ export class ModelImportService {
   /** The last import's outcome, for the status bar. */
   readonly status = signal('');
   readonly busy = signal(false);
+
+  /** Opens the STEP import dialog to change the settings without importing. */
+  async editStepSettings(): Promise<void> {
+    const s = await this.dialogs.stepOptions([], readStepSettings(), true);
+    if (s) writeStepSettings(s);
+  }
 
   /** Opens the IFC import dialog to change the settings without importing. */
   async editIfcSettings(): Promise<void> {
@@ -63,6 +70,23 @@ export class ModelImportService {
       }
     }
 
+    let step: StepImportSettings | undefined;
+    const stepFiles = readable.filter(f => isStepFile(f.name));
+    if (stepFiles.length) {
+      step = readStepSettings();
+      if (step.ask) {
+        const chosen = await this.dialogs.stepOptions(stepFiles.map(f => f.name), step);
+        if (!chosen) {
+          // Cancelled: import the other files only.
+          readable.splice(0, readable.length, ...readable.filter(f => !stepFiles.includes(f)));
+          if (!readable.length) return [];
+        } else {
+          step = chosen;
+          writeStepSettings(chosen);
+        }
+      }
+    }
+
     this.busy.set(true);
     const ids: string[] = [];
     const done: string[] = [];
@@ -73,7 +97,7 @@ export class ModelImportService {
         // Let the dialog appear before a reader holds the page.
         await nextPaint();
         try {
-          const model = await importModel(file, ifc);
+          const model = await importModel(file, ifc, step);
           for (const w of model.warnings) console.warn(`${file.name}: ${w}`);
           ids.push(this.doc.addObject(model.object));
           done.push(model.summary ? `${file.name} (${model.summary})` : file.name);

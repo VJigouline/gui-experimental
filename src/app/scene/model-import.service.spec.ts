@@ -2,7 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { PanelBus } from '../core/bus/panel-bus';
 import { DialogService } from '../ui/dialog/dialog.service';
 import { IFC_SETTINGS_KEY, defaultIfcSettings, readIfcSettings, writeIfcSettings } from './ifc-settings';
-import { isModelFile } from './model-import';
+import { isModelFile, isStepFile } from './model-import';
+import { STEP_SETTINGS_KEY, defaultStepSettings, readStepSettings, writeStepSettings } from './step-settings';
 import { ModelImportService } from './model-import.service';
 import { SceneDocument } from './scene-document';
 
@@ -21,6 +22,21 @@ describe('IFC import settings', () => {
   });
 });
 
+describe('STEP import settings', () => {
+  beforeEach(() => localStorage.clear());
+
+  it("start from MeerCADStepImport's defaults and are remembered", () => {
+    expect(readStepSettings()).toEqual(defaultStepSettings());
+    writeStepSettings({ ...defaultStepSettings(), relativeTolerance: 0.005, includeHidden: true, ask: false });
+    expect(readStepSettings()).toMatchObject({ relativeTolerance: 0.005, includeHidden: true, ask: false });
+  });
+
+  it('ignore bad saved values and keep numbers in range', () => {
+    localStorage.setItem(STEP_SETTINGS_KEY, JSON.stringify({ relativeTolerance: 5, angularTolerance: 'x', maxTrianglesPerFace: 3 }));
+    expect(readStepSettings()).toMatchObject({ relativeTolerance: 0.05, angularTolerance: 11.5, maxTrianglesPerFace: 1000 });
+  });
+});
+
 describe('ModelImportService', () => {
   let importer: ModelImportService;
   let dialogs: DialogService;
@@ -33,7 +49,9 @@ describe('ModelImportService', () => {
   });
 
   it('knows the model files it reads', () => {
-    expect(['a.ifc', 'B.IFC', 'c.glb', 'd.gltf', 'e.stl', 'f.obj'].every(isModelFile)).toBe(true);
+    expect(['a.ifc', 'B.IFC', 'c.glb', 'd.gltf', 'e.stl', 'f.obj', 'g.stp', 'h.STEP', 'i.p21', 'j.stpz'].every(isModelFile)).toBe(true);
+    expect(['g.stp', 'h.STEP', 'i.p21', 'j.stpz'].every(isStepFile)).toBe(true);
+    expect(isStepFile('a.ifc')).toBe(false);
     expect(isModelFile('notes.txt')).toBe(false);
   });
 
@@ -43,6 +61,15 @@ describe('ModelImportService', () => {
     expect(dialogs.current()).toMatchObject({ kind: 'message', title: 'Failure' });
     const r = dialogs.current();
     if (r?.kind === 'message') r.resolve();
+    expect(await done).toEqual([]);
+  });
+
+  it('asks before importing STEP, and imports nothing when cancelled', async () => {
+    const done = importer.importFiles([new File(['ISO-10303-21;'], 'part.stp')]);
+    await Promise.resolve();
+    const r = dialogs.current();
+    expect(r).toMatchObject({ kind: 'step-options', files: ['part.stp'], settingsOnly: false });
+    if (r?.kind === 'step-options') r.resolve(null);
     expect(await done).toEqual([]);
   });
 
