@@ -773,8 +773,8 @@ export class ViewportPanel {
   }
 
   /**
-   * Dragging with the middle button walks the way the mouse moves: left and right, and up and
-   * down. 400 pixels go as far as a second of walking; Shift runs.
+   * Dragging with the middle button walks left and right, and up and down, against the way the
+   * mouse moves, so the scene follows it. 400 pixels go as far as a second of walking; Shift runs.
    */
   private startSideWalk(e: PointerEvent): void {
     const canvas = e.currentTarget as HTMLElement;
@@ -791,7 +791,8 @@ export class ViewportPanel {
       moved = true;
       const step = (this.baseWalkSpeed() * this.walkSpeed() * (ev.shiftKey ? 3 : 1)) / 400;
       const { right } = this.walkAxes();
-      this.walkBy(right.multiplyScalar(dx * step).add(new THREE.Vector3(0, -dy * step, 0)));
+      // The scene follows the mouse: dragging right walks left, dragging up walks down.
+      this.walkBy(right.multiplyScalar(-dx * step).add(new THREE.Vector3(0, dy * step, 0)));
     };
     const end = () => {
       canvas.removeEventListener('pointermove', move);
