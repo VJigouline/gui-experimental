@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FACE_LOOPS_LAYER, isFaceLoops } from './scene-document';
 import { IfcImportSettings } from './ifc-settings';
 import { StepImportSettings } from './step-settings';
 
@@ -97,6 +98,10 @@ export async function importModel(file: File, ifc?: IfcImportSettings, step?: St
         preferTessellated: step?.preferTessellated,
       });
       object = result.group;
+      // The faces' boundary loops, which views show on their own layer.
+      object.traverse(o => {
+        if (isFaceLoops(o)) o.layers.set(FACE_LOOPS_LAYER);
+      });
       warnings = result.warnings;
       const s = result.stats;
       const failed = s.failedFaces ? `, ${s.failedFaces} faces failed` : '';

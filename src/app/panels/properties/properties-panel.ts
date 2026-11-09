@@ -3,7 +3,7 @@ import { DecimalPipe } from '@angular/common';
 import * as THREE from 'three';
 import { channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
-import { SceneDocument, kindOf, materialsOf } from '../../scene/scene-document';
+import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
 
 type Vec = [number, number, number];
 
@@ -216,7 +216,7 @@ export class PropertiesPanel {
             triangles: Math.round((geo.index ? geo.index.count : geo.attributes['position'].count) / 3),
           }
         : null,
-      children: o.children.length,
+      children: o.children.filter(isDocumentObject).length,
       ifc: ifcInfo(o.userData['ifc']),
       step: stepInfo(o.userData['step']),
     };

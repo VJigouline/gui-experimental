@@ -61,7 +61,7 @@ A panel may appear only once in a layout.
 
 | Type | State |
 |---|---|
-| `viewport` | `camera: { position: [x, y, z], target: [x, y, z] }`, `view` (`iso`, `top`, `bottom`, `front`, `back`, `left`, `right` or `custom`), `grid`, `axes` and `wireframe` (booleans), and `background` (a CSS colour, or `theme`). |
+| `viewport` | `camera: { position: [x, y, z], target: [x, y, z] }`, `view` (`iso`, `top`, `bottom`, `front`, `back`, `left`, `right` or `custom`), `grid`, `axes`, `wireframe` and `loops` (face loops; booleans), and `background` (a CSS colour, or `theme`). |
 | `messages` | `filter` (text) and `channel` (`A`… or empty for all). |
 
 Other panels keep no state. The Ray Tracing panel's settings are kept in the browser rather than the layout, as they apply to the whole workbench.

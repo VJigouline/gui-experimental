@@ -5,7 +5,7 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { ToolMode, ViewName } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { MenuService } from '../../ui/menu/menu.service';
-import { SceneDocument } from '../../scene/scene-document';
+import { FACE_LOOPS_LAYER, SceneDocument } from '../../scene/scene-document';
 import { ThemeService } from '../../ui/theme.service';
 import { RaytraceService, describeProgress } from '../../raytrace/raytrace.service';
 
@@ -46,7 +46,7 @@ export const BACKGROUNDS = [
       class="viewport-canvas"
       #container
       tabindex="0"
-      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; G to walk; Z to ray trace; Delete to remove."
+      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; G to walk; L for face loops; Z to ray trace; Delete to remove."
       (keydown)="onKey($event)"
       (keyup)="onKeyUp($event)"
       (blur)="stopWalking()"></div>
@@ -60,6 +60,16 @@ export const BACKGROUNDS = [
       <button type="button" class="tool-btn" [class.on]="grid()" title="Grid" (click)="toggle('grid')">#</button>
       <button type="button" class="tool-btn" [class.on]="axes()" title="Axes" (click)="toggle('axes')">⊹</button>
       <button type="button" class="tool-btn" [class.on]="wireframe()" title="Wireframe" (click)="toggle('wireframe')">◇</button>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="loops() && hasLoops()"
+        [attr.aria-pressed]="loops()"
+        [disabled]="!hasLoops()"
+        [title]="hasLoops() ? 'Face loops: the edges of solid faces and surfaces (L)' : 'Face loops: none in the scene. STEP models have them.'"
+        (click)="toggle('loops')">
+        ⬚
+      </button>
       <button type="button" class="tool-btn" title="Background" (click)="openBackgrounds($event)">◐</button>
       <span class="tool-sep"></span>
       <button
@@ -108,6 +118,9 @@ export class ViewportPanel {
   protected readonly grid = this.panel.state('grid', true);
   protected readonly axes = this.panel.state('axes', false);
   protected readonly wireframe = this.panel.state('wireframe', false);
+  /** Show the boundary loops of B-rep faces and surfaces, where the scene has them. */
+  protected readonly loops = this.panel.state('loops', true);
+  protected readonly hasLoops = computed(() => this.doc.faceLoops().length > 0);
   /** Walk mode: WASD moves the camera, dragging looks around. */
   protected readonly walking = this.panel.state('walk', false);
   /** Walking speed, as a multiple of the speed for the scene's size. */
@@ -169,6 +182,7 @@ export class ViewportPanel {
       this.grid();
       this.axes();
       this.wireframe();
+      this.loops();
       this.background();
       this.theme.dark();
       untracked(() => this.requestRender());
@@ -303,6 +317,9 @@ export class ViewportPanel {
     // With the ray traced image over the view, WebGL only clears; the image covers it.
     if (!this.tracing()) {
       const scene = this.doc.scene;
+      // Face loops are on their own layer, so each view shows them or not.
+      if (this.loops()) this.camera.layers.enable(FACE_LOOPS_LAYER);
+      else this.camera.layers.disable(FACE_LOOPS_LAYER);
       scene.overrideMaterial = this.wireframe() ? this.wireMaterial : null;
       r.render(scene, this.camera);
       scene.overrideMaterial = null;
@@ -451,8 +468,8 @@ export class ViewportPanel {
     );
   }
 
-  protected toggle(key: 'grid' | 'axes' | 'wireframe'): void {
-    const current = { grid: this.grid, axes: this.axes, wireframe: this.wireframe }[key]();
+  protected toggle(key: 'grid' | 'axes' | 'wireframe' | 'loops'): void {
+    const current = { grid: this.grid, axes: this.axes, wireframe: this.wireframe, loops: this.loops }[key]();
     this.panel.setState({ [key]: !current });
   }
 
@@ -515,6 +532,8 @@ export class ViewportPanel {
       this.panel.publish('tool.mode', { mode: modes[key], space: t?.space ?? 'world', snap: t?.snap ?? null }, true);
     } else if (key === 'f') {
       this.fit();
+    } else if (key === 'l' && plain && !e.repeat) {
+      this.toggle('loops');
     } else if (key === 'delete' || key === 'backspace') {
       const ids = this.selection()?.ids ?? [];
       if (!ids.length) return;

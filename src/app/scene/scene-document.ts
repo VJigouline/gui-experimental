@@ -48,6 +48,19 @@ export class SceneDocument {
     return this.scene.children.filter(isDocumentObject).map(node);
   });
 
+  /**
+   * Lines along the boundary loops of B-rep faces and surfaces, which STEP import adds under its
+   * meshes. Views show or hide them; they aren't objects of their own.
+   */
+  readonly faceLoops = computed<THREE.Object3D[]>(() => {
+    this.revision();
+    const out: THREE.Object3D[] = [];
+    this.scene.traverse(o => {
+      if (isFaceLoops(o)) out.push(o);
+    });
+    return out;
+  });
+
   readonly objectCount = computed(() => {
     this.revision();
     let n = -1;
@@ -350,7 +363,18 @@ const NAMES: Record<PrimitiveKind, string> = {
 
 /** Objects that belong to the document, as opposed to helpers a view adds. */
 export function isDocumentObject(o: THREE.Object3D): boolean {
-  return !o.userData['helper'];
+  return !o.userData['helper'] && !isFaceLoops(o);
+}
+
+/**
+ * The three.js layer face loops are drawn on. Views enable it on their cameras to show them, and
+ * picking, which looks at layer 0 only, doesn't hit them.
+ */
+export const FACE_LOOPS_LAYER = 1;
+
+/** Face boundary lines from STEP import, as MeerCADStepImport marks them. */
+export function isFaceLoops(o: THREE.Object3D): boolean {
+  return o.userData['stepEdges'] === true;
 }
 
 export function kindOf(o: THREE.Object3D): string {

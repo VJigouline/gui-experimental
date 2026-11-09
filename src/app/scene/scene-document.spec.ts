@@ -104,4 +104,18 @@ describe('SceneDocument', () => {
     doc.reset();
     expect(names()).toEqual(['Sky light', 'Sun', 'Assembly', 'Knot 1', 'Cone 1', 'Torus 1']);
   });
+
+  it('keeps face loops out of the tree and the count, and lists them for views', () => {
+    expect(doc.faceLoops()).toEqual([]);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
+    mesh.name = 'Part';
+    const loops = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial());
+    loops.userData['stepEdges'] = true;
+    mesh.add(loops);
+    const count = doc.objectCount();
+    doc.addObject(mesh);
+    expect(doc.tree().find(n => n.name === 'Part')!.children).toEqual([]);
+    expect(doc.objectCount()).toBe(count + 1);
+    expect(doc.faceLoops()).toEqual([loops]);
+  });
 });
