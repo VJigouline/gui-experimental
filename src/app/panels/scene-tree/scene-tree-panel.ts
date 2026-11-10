@@ -3,7 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, SceneTreeNode } from '../../scene/scene-document';
 
-const ICONS: Record<string, string> = { Mesh: '◆', Group: '▣', Light: '☀', Line: '╱', Points: '∴' };
+const ICONS: Record<string, string> = { Mesh: '◆', Group: '▣', Solid: '◈', Light: '☀', Line: '╱', Points: '∴' };
 
 /**
  * The scene's objects as a tree. Selecting here selects in the 3D views and

@@ -86,7 +86,7 @@ The JSON format is described in [Documentation/Layout-Format.md](Documentation/L
 | 3D View | The scene, with its own camera. Drag to orbit, right-drag to pan, scroll to zoom. Click to select, Shift+click to add to the selection, double-click to frame. **Sizing shapes:** with a box, sphere, cylinder, cone, torus or plane selected, drag its face, edge or corner to change its size; the cursor shows what will be held. A box face changes one size, an edge two and a corner three. A cylinder's or cone's side changes the diameter, a cap or the apex the height, and a rim both. A torus's outside or inside changes its outer or inner diameter, and its front or back the thickness. The opposite side stays put; hold Ctrl to keep the centre instead. Engineering dimension lines show the sizes as they change, Snap in Edit Tools rounds them, and Esc puts the shape back. Keys: Q select, W move, E rotate, R scale, F fit, B zoom box, Delete remove, Esc deselect, G walk, L face loops, Z ray trace. Walk mode (G, or 🚶 Walk): WASD or the arrows move over the ground, Q/E go down and up, drag to look, middle-drag walks left, right, up and down, the wheel walks forward and back, Shift goes fast (3× with the keys, 5× with the mouse), Ctrl+wheel sets the speed, Esc leaves. ⚙ next to Walk opens Walk settings, for the view's normal speed in m/s and the two fast multipliers. Zoom box (⊕ Zoom, or B): drag a rectangle and the view zooms to it, keeping its direction; a click zooms in twice about that point. Its toolbar sets the view direction, grid, axes, wireframe, face loops and background. Face loops (⬚, or L) are the edges of solid faces and surfaces in STEP models, drawn over the faces; the button is off when the scene has none. |
 | Scene Tree | The scene's objects as a tree. Click to select; Ctrl+click and Shift+click select more. Double-click to frame, 👁 to hide. Drag a row onto another to move it inside. |
 | Properties | The selected object's name, visibility, transform, material or light, for editing; for a box, sphere, cylinder, cone, torus or plane, also its dimensions. For IFC elements, also their entity type, GlobalId, materials and property sets; for STEP parts, their product and shape item. |
-| Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights and models (glTF, GLB, STL, OBJ, IFC, STEP). Duplicates, deletes, groups and ungroups the selection. |
+| Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights and models (glTF, GLB, STL, OBJ, IFC, STEP). Duplicates, deletes, groups and ungroups the selection. Combines shapes into solids: union, subtract and intersect. |
 | Ray Tracing | Photorealistic images of a 3D view with MeerCADRaytracer, as on SceneEditor's Photorealistic tab. See [Ray tracing](#ray-tracing). |
 | Messages | The messages panels send each other, with their channel, sender and content. |
 | Panels & Links | Every open panel, with its title, link and place, for editing. |
@@ -102,6 +102,16 @@ glTF, GLB, STL, OBJ, IFC and STEP files can be imported from **File › Import m
 - **Afterwards,** the model is named after its file, and selected and framed on a link channel. That's Link A from the menu or toolbar, the Edit Tools panel's link from there, or the link of the panel the files were dropped on.
 
 Selecting an IFC element shows its IFC data in Properties, with each property set as a section that opens. Selecting a STEP part or assembly shows its product, ID and placement, and for its meshes the shape item they came from.
+
+## Solids
+
+Shapes can be combined into solids, which are worked out with [three-bvh-csg](https://github.com/gkjohnson/three-bvh-csg):
+
+- **Making one:** select two or more boxes, spheres, cylinders, cones, tori, knots or solids, then use **Union**, **Subtract** or **Intersect** in **Edit Tools**. Subtract takes the rest from the one selected first. Planes, groups and imported models can't take part.
+- **The solid tree:** a solid is a node in the scene tree, with its operands inside it in order, and solids can be operands of other solids. Drag a shape onto a solid in the tree to add it, or out to take it away. Hide an operand to leave it out for a while.
+- **Editing:** the result follows its operands as they change: moved with the gizmo, sized by dragging, or typed in Properties. Operands are out of view, but a selected one is drawn as a ghost through the result and can still be moved and sized. Click the result to select the solid, or **Alt+click** to select the operand under the pointer.
+- **Properties** sets a solid's operation; for an operand, it shows its place and moves it earlier or later. A solid's colour and finish are its operands', and cut faces take the colour of the shape that cut them.
+- **Ungroup** turns a solid back into its shapes, where they were.
 
 ## Ray tracing
 
@@ -142,4 +152,5 @@ src/app/
 - **TypeScript** 6.0. This is the newest version Angular 22 supports; TypeScript 7 isn't supported yet.
 - **three.js** 0.187.
 - **MeerCADRaytracer**, **MeerCADIFCImport** and **MeerCADStepImport**, pinned to commits, as in SceneEditor.
+- **three-bvh-csg** 0.0.18, for solids, with three-mesh-bvh pinned to 0.9.10, the last without deprecation warnings for it.
 - **Vitest** 5, for the unit tests.

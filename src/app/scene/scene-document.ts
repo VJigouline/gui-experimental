@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import * as THREE from 'three';
 import { buildGeometry, editableShape } from './primitive-edit';
+import { SOLID_OPERATIONS, SolidEngine, SolidOperation, canBeOperand, isSolid, isSolidResult, solidResult } from './solids';
 
 /** The kinds of object the editing tools can add. */
 export type PrimitiveKind = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'knot' | 'plane' | 'group' | 'point-light';
@@ -35,6 +36,8 @@ export class SceneDocument {
   readonly revision = signal(0);
   private colorIndex = 0;
   private readonly counters = new Map<string, number>();
+  /** Works out solids' results again as their operands change. */
+  private readonly solids = new SolidEngine();
 
   /** The scene's objects as a tree, for listing. */
   readonly tree = computed<SceneTreeNode[]>(() => {
@@ -76,8 +79,9 @@ export class SceneDocument {
     this.reset();
   }
 
-  /** Marks the scene changed. */
+  /** Marks the scene changed, and brings solids up to date with their operands. */
   touch(): void {
+    this.solids.sync(this.scene);
     this.revision.update(r => r + 1);
   }
 
@@ -146,7 +150,9 @@ export class SceneDocument {
     const o = this.make(kind);
     if (kind !== 'group' && kind !== 'point-light' && kind !== 'plane') o.position.y = 0.5;
     if (kind === 'point-light') o.position.set(0, 2.5, 0);
-    const parent = (parentId && this.get(parentId)) || this.scene;
+    let parent = (parentId && this.get(parentId)) || this.scene;
+    // Into a solid, only what can be an operand; anything else goes beside it.
+    if (isSolid(parent) && !canBeOperand(o)) parent = parent.parent ?? this.scene;
     parent.add(o);
     this.touch();
     return o.uuid;
@@ -214,10 +220,69 @@ export class SceneDocument {
     return group.uuid;
   }
 
+  /**
+   * Combines objects into a solid: a union, subtraction or intersection of them, in the order
+   * given; a subtraction takes the rest from the first. Only base primitives that are closed and
+   * other solids can take part. Returns the solid's id, or null if fewer than two can.
+   */
+  combine(ids: readonly string[], operation: SolidOperation): string | null {
+    const all = this.objects(ids);
+    const objects = all.filter(o => canBeOperand(o) && !all.some(p => p !== o && isAncestor(p, o)));
+    if (objects.length < 2) return null;
+    const solid = new THREE.Group();
+    solid.userData['solid'] = { operation };
+    solid.name = this.nextName(SOLID_OPERATIONS.find(x => x.op === operation)!.name);
+    const parent = objects[0].parent ?? this.scene;
+    const box = new THREE.Box3();
+    objects.forEach(o => box.expandByObject(o));
+    parent.add(solid);
+    if (!box.isEmpty()) {
+      solid.position.copy(parent.worldToLocal(box.getCenter(new THREE.Vector3())));
+    }
+    solid.updateMatrixWorld(true);
+    objects.forEach(o => solid.attach(o));
+    this.touch();
+    return solid.uuid;
+  }
+
+  /** Changes a solid's operation. */
+  setOperation(id: string, operation: SolidOperation): void {
+    const o = this.get(id);
+    if (!o || !isSolid(o)) return;
+    o.userData['solid'] = { ...(o.userData['solid'] as object), operation };
+    if (/^(Union|Difference|Intersection) \d+$/.test(o.name)) {
+      o.name = this.nextName(SOLID_OPERATIONS.find(x => x.op === operation)!.name);
+    }
+    this.touch();
+  }
+
+  /** Moves an operand earlier (-1) or later (+1) among its solid's operands, or any object among its siblings. */
+  moveInOrder(id: string, delta: -1 | 1): boolean {
+    const o = this.get(id);
+    const parent = o?.parent;
+    if (!o || !parent) return false;
+    const siblings = parent.children.filter(c => !isSolidResult(c) && isDocumentObject(c));
+    const i = siblings.indexOf(o);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= siblings.length) return false;
+    const a = parent.children.indexOf(o);
+    const b = parent.children.indexOf(siblings[j]);
+    parent.children[a] = siblings[j];
+    parent.children[b] = o;
+    this.touch();
+    return true;
+  }
+
   /** Moves a group's children to its parent and removes the group. Returns the children's ids. */
   ungroup(id: string): string[] {
     const g = this.get(id);
     if (!g || !(g instanceof THREE.Group) || !g.parent) return [];
+    // A solid's result goes with it; its operands become objects of their own again.
+    const result = solidResult(g);
+    if (result) {
+      result.removeFromParent();
+      result.geometry.dispose();
+    }
     const parent = g.parent;
     const children = [...g.children];
     children.forEach(c => parent.attach(c));
@@ -231,6 +296,8 @@ export class SceneDocument {
     const o = this.get(id);
     const parent = parentId ? this.get(parentId) : this.scene;
     if (!o || !parent || parent === o || isAncestor(o, parent) || o.parent === parent) return false;
+    // Only what can be an operand goes into a solid.
+    if (isSolid(parent) && !canBeOperand(o)) return false;
     parent.attach(o);
     this.touch();
     return true;
@@ -285,7 +352,11 @@ export class SceneDocument {
         if (patch.intensity !== undefined) light.intensity = patch.intensity;
         continue;
       }
-      for (const m of materialsOf(o)) {
+      // A solid's material is its operands'.
+      const targets: THREE.Object3D[] = [];
+      if (isSolid(o)) o.traverse(c => (c as THREE.Mesh).isMesh && !isSolidResult(c) && targets.push(c));
+      else targets.push(o);
+      for (const m of targets.flatMap(materialsOf)) {
         if (patch.color && 'color' in m) (m as THREE.MeshStandardMaterial).color.set(patch.color);
         if (m instanceof THREE.MeshStandardMaterial) {
           if (patch.roughness !== undefined) m.roughness = patch.roughness;
@@ -394,6 +465,7 @@ export function isFaceLoops(o: THREE.Object3D): boolean {
 }
 
 export function kindOf(o: THREE.Object3D): string {
+  if (isSolid(o)) return 'Solid';
   if ((o as THREE.Light).isLight) return 'Light';
   if ((o as THREE.Mesh).isMesh) return 'Mesh';
   if ((o as THREE.Line).isLine) return 'Line';

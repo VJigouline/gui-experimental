@@ -4,6 +4,7 @@ import { PanelContext } from '../../core/panels/panel-context';
 import { MODEL_EXTENSIONS } from '../../scene/model-import';
 import { ModelImportService } from '../../scene/model-import.service';
 import { PrimitiveKind, SceneDocument } from '../../scene/scene-document';
+import { SOLID_OPERATIONS, SolidOperation, canBeOperand } from '../../scene/solids';
 import { SelectValue } from '../../ui/select-value';
 
 const MODES: { mode: ToolMode; label: string; icon: string; key: string }[] = [
@@ -99,6 +100,22 @@ const PRIMITIVES: { kind: PrimitiveKind; label: string; icon: string }[] = [
     </section>
 
     <section class="tool-section">
+      <h3>Solids</h3>
+      <div class="button-grid">
+        @for (s of solidOps; track s.op) {
+          <button type="button" class="tool-btn big" [disabled]="operandCount() < 2" [title]="s.title" (click)="combine(s.op)">{{ s.icon }} {{ s.label }}</button>
+        }
+      </div>
+      <p class="status-text">
+        @if (operandCount() < 2) {
+          Select two or more boxes, spheres, cylinders, cones, tori, knots or solids. For Subtract, select the one to cut from first.
+        } @else {
+          {{ operandCount() }} operands; the first is {{ firstName() }}.
+        }
+      </p>
+    </section>
+
+    <section class="tool-section">
       <h3>Views on {{ channel().label }}</h3>
       <div class="button-grid">
         @for (v of views; track v.view) {
@@ -137,6 +154,21 @@ export class ToolsPanel {
     return this.doc.objects(this.selection()?.ids).map(o => o.uuid);
   });
   protected readonly count = computed(() => this.ids().length);
+  protected readonly solidOps = SOLID_OPERATIONS.map(s => ({
+    ...s,
+    title: {
+      union: 'Union: one solid made of all the selected ones',
+      subtract: 'Subtract: the first selected, with the others cut away from it',
+      intersect: 'Intersect: only what all the selected have in common',
+    }[s.op],
+  }));
+  /** Selected objects that can take part in a solid operation, in the order selected. */
+  private readonly operands = computed(() => {
+    this.doc.revision();
+    return this.doc.objects(this.ids()).filter(canBeOperand);
+  });
+  protected readonly operandCount = computed(() => this.operands().length);
+  protected readonly firstName = computed(() => this.operands()[0]?.name ?? '');
   protected readonly canUngroup = computed(() => {
     this.doc.revision();
     const o = this.doc.objects(this.ids());
@@ -169,6 +201,12 @@ export class ToolsPanel {
 
   protected group(): void {
     const id = this.doc.group(this.ids());
+    if (id) this.select([id]);
+  }
+
+  /** Combines the selection into a solid, and selects it. */
+  protected combine(op: SolidOperation): void {
+    const id = this.doc.combine(this.ids(), op);
     if (id) this.select([id]);
   }
 

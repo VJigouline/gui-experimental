@@ -13,6 +13,7 @@ import { RaytraceService, describeProgress } from '../../raytrace/raytrace.servi
 import {
   Dimension, EditableShape, Handle, constrainedPoint, dimensionLines, editableShape, formatLength, pickHandle,
 } from '../../scene/primitive-edit';
+import { OPERAND_LAYER, isSolidResult, solidOf } from '../../scene/solids';
 
 interface CameraState {
   position: [number, number, number];
@@ -213,6 +214,9 @@ export class ViewportPanel {
   private readonly axesHelper = new THREE.AxesHelper(1.5);
   private readonly boxes = new Map<string, THREE.Box3Helper>();
   private readonly wireMaterial = new THREE.MeshBasicMaterial({ color: 0x9fb4d8, wireframe: true });
+  /** Selected operands of solids, drawn through the result: a faint fill and their edges. */
+  private readonly ghostFill = new THREE.MeshBasicMaterial({ color: 0xffd400, transparent: true, opacity: 0.16, depthTest: false, depthWrite: false });
+  private readonly ghostLines = new THREE.MeshBasicMaterial({ color: 0xffd400, wireframe: true, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false });
   private frame = 0;
   private fitOnFirstSize = false;
   private pointerDown: { x: number; y: number; onGizmo: boolean } | null = null;
@@ -349,6 +353,8 @@ export class ViewportPanel {
     this.gridHelper.dispose();
     this.axesHelper.dispose();
     this.wireMaterial.dispose();
+    this.ghostFill.dispose();
+    this.ghostLines.dispose();
     if (this.renderer) {
       this.renderer.domElement.remove();
       this.renderer.dispose();
@@ -385,11 +391,38 @@ export class ViewportPanel {
       scene.overrideMaterial = this.wireframe() ? this.wireMaterial : null;
       r.render(scene, this.camera);
       scene.overrideMaterial = null;
+      this.drawOperandGhosts(r);
       r.render(this.overlay, this.camera);
     }
     this.drawDimensions();
     // Ray traces again from the camera as it is now, when this view is traced.
     this.raytrace?.render(this.panel.id);
+  }
+
+  /**
+   * Selected operands of solids are out of view, inside or cut away from the result: draws them as
+   * ghosts over it, so they can be seen, moved and sized.
+   */
+  private drawOperandGhosts(r: THREE.WebGLRenderer): void {
+    const meshes: THREE.Object3D[] = [];
+    for (const o of this.doc.objects(this.selection()?.ids)) {
+      if (!solidOf(o)) continue;
+      o.traverse(c => {
+        if ((c as THREE.Mesh).isMesh && c.layers.isEnabled(OPERAND_LAYER) && isShown(c)) meshes.push(c);
+      });
+    }
+    if (!meshes.length) return;
+    const scene = this.doc.scene;
+    const mask = this.camera.layers.mask;
+    meshes.forEach(m => m.layers.enable(GHOST_LAYER));
+    this.camera.layers.set(GHOST_LAYER);
+    for (const material of [this.ghostFill, this.ghostLines]) {
+      scene.overrideMaterial = material;
+      r.render(scene, this.camera);
+    }
+    scene.overrideMaterial = null;
+    this.camera.layers.mask = mask;
+    meshes.forEach(m => m.layers.disable(GHOST_LAYER));
   }
 
   /** The view's background as a CSS colour. */
@@ -568,9 +601,12 @@ export class ViewportPanel {
     this.selectAt(e);
   };
 
-  /** A click selects what is under it; with Shift or Ctrl, adds it or takes it away. */
+  /**
+   * A click selects what is under it; with Shift or Ctrl, adds it or takes it away. A click on a
+   * solid selects the solid; Alt+click selects the operand of it under the pointer.
+   */
   private selectAt(e: MouseEvent): void {
-    const id = this.pick(e);
+    const id = e.altKey ? this.pickOperand(e) ?? this.pick(e) : this.pick(e);
     const current = this.selection()?.ids ?? [];
     let ids: string[];
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -589,7 +625,19 @@ export class ViewportPanel {
   };
 
   private pick(e: MouseEvent): string | null {
-    return this.firstHit(this.rayAt(e))?.object.uuid ?? null;
+    const o = this.firstHit(this.rayAt(e))?.object;
+    // A solid's result stands for the solid.
+    return o ? (isSolidResult(o) ? o.parent!.uuid : o.uuid) : null;
+  }
+
+  /** The nearest operand of a solid under the pointer, inside or cut away from the result. */
+  private pickOperand(e: MouseEvent): string | null {
+    const ray = this.rayAt(e);
+    ray.layers.set(OPERAND_LAYER);
+    const hit = ray
+      .intersectObjects(this.doc.scene.children, true)
+      .find(h => isShown(h.object) && !isSolidResult(h.object) && !!solidOf(h.object));
+    return hit?.object.uuid ?? null;
   }
 
   /** A ray from the camera through the pointer. */
@@ -672,10 +720,15 @@ export class ViewportPanel {
     const selected = this.doc.objects(this.selection()?.ids).filter(o => isShown(o) && !!editableShape(o));
     if (!selected.length) return null;
     const ray = this.rayAt(e);
+    // Operands of solids are on their own layer, out of view but drawn as ghosts when selected.
+    ray.layers.enable(OPERAND_LAYER);
     const hit = ray.intersectObjects(selected, false)[0];
+    ray.layers.set(0);
     if (!hit?.face) return null;
     const first = this.firstHit(ray);
-    if (first && first.object !== hit.object && first.distance < hit.distance) return null;
+    // In front, only the result of the solid it is part of may be.
+    const ownResult = (o: THREE.Object3D) => isSolidResult(o) && !!o.parent && isInside(hit.object, o.parent);
+    if (first && first.object !== hit.object && first.distance < hit.distance && !ownResult(first.object)) return null;
     const mesh = hit.object as THREE.Mesh;
     const shape = editableShape(mesh)!;
     const local = mesh.worldToLocal(hit.point.clone());
@@ -1298,6 +1351,15 @@ function isLight(colour: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The layer selected operands are put on for a moment, to draw them as ghosts. */
+const GHOST_LAYER = 3;
+
+/** Whether `o` is inside `ancestor`. */
+function isInside(o: THREE.Object3D, ancestor: THREE.Object3D): boolean {
+  for (let p = o.parent; p; p = p.parent) if (p === ancestor) return true;
+  return false;
 }
 
 /** Whether an object and all its parents are visible. */

@@ -5,6 +5,7 @@ import { channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
 import { DimensionName, dimensionsOf, editableShape, withDimension } from '../../scene/primitive-edit';
+import { SOLID_OPERATIONS, SolidOperation, canBeOperand, isSolid, isSolidResult, solidOf, solidOperation, solidResult } from '../../scene/solids';
 
 type Vec = [number, number, number];
 
@@ -22,6 +23,10 @@ interface Props {
   geometry: { vertices: number; triangles: number } | null;
   /** A primitive's sizes, before its scale. */
   dimensions: { name: DimensionName; label: string; value: number }[] | null;
+  /** For a solid: its operation, how many operands it combines, and the result's size. */
+  solid: { operation: SolidOperation; operands: number; triangles: number } | null;
+  /** For an operand of a solid: which solid, and its place among the operands. */
+  operand: { solidId: string; solid: string; index: number; count: number; role: string } | null;
   children: number;
   ifc: IfcInfo | null;
   step: { label: string; value: string }[] | null;
@@ -82,6 +87,37 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
             </div>
           }
         </fieldset>
+
+        @if (p.solid; as sol) {
+          <fieldset>
+            <legend>Solid</legend>
+            <label class="field">
+              <span>Operation</span>
+              <select class="input" [value]="sol.operation" (change)="doc.setOperation(p.id, $any(value($event)))">
+                @for (o of operations; track o.op) {
+                  <option [value]="o.op" [selected]="o.op === sol.operation">{{ o.icon }} {{ o.label }}</option>
+                }
+              </select>
+            </label>
+            <div class="field"><span>Operands</span><span class="readonly">{{ sol.operands }}{{ sol.operation === 'subtract' && sol.operands ? ', the first cut by the rest' : '' }}</span></div>
+            <div class="field"><span>Result</span><span class="readonly">{{ sol.triangles | number }} triangles</span></div>
+          </fieldset>
+        }
+
+        @if (p.operand; as op) {
+          <fieldset>
+            <legend>Operand</legend>
+            <div class="field"><span>Of</span><span class="readonly">{{ op.solid }}</span></div>
+            <div class="field"><span>Place</span><span class="readonly">{{ op.index + 1 }} of {{ op.count }} · {{ op.role }}</span></div>
+            <div class="field">
+              <span>Order</span>
+              <span>
+                <button type="button" class="btn" [disabled]="op.index === 0" (click)="doc.moveInOrder(p.id, -1)">↑ Earlier</button>
+                <button type="button" class="btn" [disabled]="op.index === op.count - 1" (click)="doc.moveInOrder(p.id, 1)">↓ Later</button>
+              </span>
+            </div>
+          </fieldset>
+        }
 
         @if (p.dimensions; as dims) {
           <fieldset>
@@ -188,6 +224,7 @@ export class PropertiesPanel {
   });
   protected readonly count = computed(() => this.ids().length);
 
+  protected readonly operations = SOLID_OPERATIONS;
   protected readonly axes = [0, 1, 2] as const;
   protected readonly axisNames = ['X', 'Y', 'Z'];
   protected readonly transformRows = [
@@ -202,7 +239,9 @@ export class PropertiesPanel {
     if (ids.length !== 1) return null;
     const o = this.doc.get(ids[0]);
     if (!o) return null;
-    const mats = materialsOf(o);
+    // A solid's material is its operands'; the first stands for them all.
+    const firstOperand = isSolid(o) ? operandMeshes(o)[0] : undefined;
+    const mats = materialsOf(firstOperand ?? o);
     const m = mats[0] as THREE.MeshStandardMaterial | undefined;
     const light = (o as THREE.Light).isLight ? (o as THREE.Light) : null;
     const geo = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
@@ -234,6 +273,32 @@ export class PropertiesPanel {
       dimensions: (() => {
         const shape = editableShape(o);
         return shape ? dimensionsOf(shape).map(d => ({ ...d, value: round(d.value) })) : null;
+      })(),
+      solid: isSolid(o)
+        ? {
+            operation: solidOperation(o) ?? 'union',
+            operands: o.children.filter(c => !isSolidResult(c) && canBeOperand(c)).length,
+            triangles: triangles(solidResult(o)?.geometry),
+          }
+        : null,
+      operand: (() => {
+        const sol = solidOf(o);
+        if (!sol || o.parent !== sol) return null;
+        const list = sol.children.filter(c => !isSolidResult(c) && isDocumentObject(c));
+        const index = list.indexOf(o);
+        const op = solidOperation(sol) ?? 'union';
+        const role = !o.visible
+          ? 'hidden, left out'
+          : !canBeOperand(o)
+            ? 'not a closed shape, left out'
+            : op === 'subtract'
+              ? index === 0
+                ? 'cut from'
+                : 'cut away'
+              : op === 'intersect'
+                ? 'intersected'
+                : 'joined';
+        return { solidId: sol.uuid, solid: sol.name, index, count: list.length, role };
       })(),
       children: o.children.filter(isDocumentObject).length,
       ifc: ifcInfo(o.userData['ifc']),
@@ -272,6 +337,21 @@ export class PropertiesPanel {
   protected checked(event: Event): boolean {
     return (event.target as HTMLInputElement).checked;
   }
+}
+
+/** The meshes a solid is made of, at any depth, without results. */
+function operandMeshes(solid: THREE.Object3D): THREE.Mesh[] {
+  const out: THREE.Mesh[] = [];
+  solid.traverse(c => {
+    if ((c as THREE.Mesh).isMesh && !isSolidResult(c)) out.push(c as THREE.Mesh);
+  });
+  return out;
+}
+
+function triangles(g: THREE.BufferGeometry | undefined): number {
+  const pos = g?.getAttribute('position');
+  if (!g || !pos) return 0;
+  return Math.round((g.index ? g.index.count : pos.count) / 3);
 }
 
 /** The IFC data an imported object carries, as label and value rows. */

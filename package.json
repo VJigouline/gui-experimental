@@ -35,6 +35,8 @@
     "meercad-step-import": "github:VJigouline/MeerCADStepImport#1a99768d0664549084fb84dc1a3cdbae7e1c142c",
     "rxjs": "~7.8.0",
     "three": "^0.187.0",
+    "three-bvh-csg": "^0.0.18",
+    "three-mesh-bvh": "0.9.10",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
