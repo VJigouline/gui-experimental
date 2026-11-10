@@ -1419,6 +1419,46 @@ body.resizing-row canvas {
   }
 }
 
+.material-props {
+  details {
+    margin: 2px 0;
+    border-top: 1px solid var(--border-subtle);
+
+    summary {
+      padding: 4px 0;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+  }
+
+  .slider-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+
+    input[type='range'] {
+      flex: 1;
+      min-width: 0;
+    }
+  }
+
+  .slider-value {
+    width: 3.2em;
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .not-traced {
+    color: var(--muted);
+    cursor: help;
+  }
+}
+
 .ifc-dialog {
   width: min(460px, 86vw);
 

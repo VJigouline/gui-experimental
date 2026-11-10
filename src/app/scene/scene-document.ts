@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import * as THREE from 'three';
 import { buildGeometry, editableShape } from './primitive-edit';
+import { FieldValue, MATERIAL_FIELDS, convertMaterial, isMeshMaterial, writeField } from './materials';
 import { SOLID_OPERATIONS, SolidEngine, SolidOperation, canBeOperand, isSolid, isSolidResult, solidResult } from './solids';
 
 /** The kinds of object the editing tools can add. */
@@ -428,6 +429,71 @@ export class SceneDocument {
     cam.updateProjectionMatrix();
   }
 
+  /**
+   * The meshes, or other drawn objects, whose materials editing an object's material changes: the
+   * object itself, or for a solid, the shapes it is made of.
+   */
+  materialOwners(o: THREE.Object3D): THREE.Object3D[] {
+    if (isSolid(o)) {
+      const out: THREE.Object3D[] = [];
+      o.traverse(c => {
+        if ((c as THREE.Mesh).isMesh && !isSolidResult(c)) out.push(c);
+      });
+      return out;
+    }
+    return materialsOf(o).length ? [o] : [];
+  }
+
+  /** Sets one setting of the materials of objects, in slot `slot` where they have several. */
+  setMaterialField(ids: readonly string[], key: string, value: FieldValue, slot = 0): void {
+    const field = MATERIAL_FIELDS.find(f => f.key === key);
+    if (!field) return;
+    const done = new Set<THREE.Material>();
+    for (const o of this.objects(ids)) {
+      for (const owner of this.materialOwners(o)) {
+        const m = materialAt(owner, slot);
+        if (m && !done.has(m)) {
+          writeField(m, field, value);
+          done.add(m);
+        }
+      }
+    }
+    this.touch();
+  }
+
+  /**
+   * Changes the type of the materials of objects, in slot `slot`, keeping the settings the types
+   * share. Objects that shared a material share the new one. Returns how many were changed.
+   */
+  setMaterialType(ids: readonly string[], type: string, slot = 0): number {
+    const made = new Map<THREE.Material, THREE.Material>();
+    for (const o of this.objects(ids)) {
+      for (const owner of this.materialOwners(o)) {
+        const mesh = owner as THREE.Mesh;
+        const old = materialAt(owner, slot);
+        if (!old || old.type === type || !isMeshMaterial(old)) continue;
+        let next = made.get(old);
+        if (!next) {
+          next = convertMaterial(old, type) ?? undefined;
+          if (!next) continue;
+          made.set(old, next);
+        }
+        if (Array.isArray(mesh.material)) mesh.material[Math.min(slot, mesh.material.length - 1)] = next;
+        else mesh.material = next;
+      }
+    }
+    // Materials nothing uses any more are let go.
+    if (made.size) {
+      const used = new Set<THREE.Material>();
+      this.scene.traverse(c => {
+        if (!isSolidResult(c)) materialsOf(c).forEach(m => used.add(m));
+      });
+      for (const old of made.keys()) if (!used.has(old)) old.dispose();
+    }
+    this.touch();
+    return made.size;
+  }
+
   /** Changes material properties of meshes, or the colour and intensity of lights. */
   setMaterial(
     ids: readonly string[],
@@ -616,6 +682,12 @@ export function kindOf(o: THREE.Object3D): string {
   if ((o as THREE.Points).isPoints) return 'Points';
   if ((o as THREE.Group).isGroup) return 'Group';
   return o.type;
+}
+
+/** An object's material in a slot: the one it has, or the slot's, where it has several. */
+export function materialAt(o: THREE.Object3D, slot: number): THREE.Material | undefined {
+  const all = materialsOf(o);
+  return all[Math.min(Math.max(slot, 0), all.length - 1)];
 }
 
 export function materialsOf(o: THREE.Object3D): THREE.Material[] {

@@ -1,9 +1,10 @@
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, linkedSignal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import * as THREE from 'three';
 import { channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
+import { FieldValue, MATERIAL_GROUPS, MATERIAL_TYPES, MaterialField, SIDES, fieldsOf, materialType, readField } from '../../scene/materials';
 import { DimensionName, dimensionsOf, editableShape, withDimension } from '../../scene/primitive-edit';
 import { SOLID_OPERATIONS, SolidOperation, canBeOperand, isSolid, isSolidResult, solidOf, solidOperation, solidResult } from '../../scene/solids';
 
@@ -18,7 +19,7 @@ interface Props {
   position: Vec;
   rotation: Vec;
   scale: Vec;
-  material: { color: string; roughness: number | null; metalness: number | null; opacity: number; wireframe: boolean } | null;
+  material: MaterialProps | null;
   light: LightProps | null;
   geometry: { vertices: number; triangles: number } | null;
   /** A primitive's sizes, before its scale. */
@@ -30,6 +31,20 @@ interface Props {
   children: number;
   ifc: IfcInfo | null;
   step: { label: string; value: string }[] | null;
+}
+
+/** A material's type and the settings it has, in groups, for one slot. */
+interface MaterialProps {
+  slots: { index: number; label: string }[];
+  slot: number;
+  type: string;
+  about: string;
+  /** Whether its type can be changed: one of the mesh materials. */
+  convertible: boolean;
+  /** Who else the material is shared with, if anyone. */
+  shared: string;
+  groups: { name: string; open: boolean; fields: { f: MaterialField; value: FieldValue }[] }[];
+  note: string;
 }
 
 /** A light's settings; those its kind doesn't have are left out. Angles in degrees. */
@@ -179,30 +194,90 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
         }
 
         @if (p.material; as m) {
-          <fieldset>
+          <fieldset class="material-props">
             <legend>Material</legend>
-            <label class="field">
-              <span>Colour</span>
-              <input type="color" [value]="m.color" (input)="doc.setMaterial([p.id], { color: value($event) })" />
-            </label>
-            @if (m.roughness !== null) {
-              <label class="field">
-                <span>Roughness</span>
-                <input type="range" min="0" max="1" step="0.01" [value]="m.roughness" (input)="doc.setMaterial([p.id], { roughness: num($event) })" />
-              </label>
-              <label class="field">
-                <span>Metalness</span>
-                <input type="range" min="0" max="1" step="0.01" [value]="m.metalness" (input)="doc.setMaterial([p.id], { metalness: num($event) })" />
+            @if (m.slots.length > 1) {
+              <label class="field" title="This object has several materials, for different parts of it">
+                <span>Slot</span>
+                <select class="input" (change)="slot.set(+value($event))">
+                  @for (s of m.slots; track s.index) {
+                    <option [value]="s.index" [selected]="s.index === m.slot">{{ s.label }}</option>
+                  }
+                </select>
               </label>
             }
             <label class="field">
-              <span>Opacity</span>
-              <input type="range" min="0.05" max="1" step="0.01" [value]="m.opacity" (input)="doc.setMaterial([p.id], { opacity: num($event) })" />
+              <span>Type</span>
+              @if (m.convertible) {
+                <select class="input" [title]="m.about" (change)="setMaterialType(p.id, value($event), m.slot)">
+                  @for (t of materialTypes; track t.type) {
+                    <option [value]="t.type" [selected]="t.type === m.type" [title]="t.about">{{ t.label }}</option>
+                  }
+                </select>
+              } @else {
+                <span class="readonly">{{ m.type }}</span>
+              }
             </label>
-            <label class="field">
-              <span>Wireframe</span>
-              <input type="checkbox" [checked]="m.wireframe" (change)="doc.setMaterial([p.id], { wireframe: checked($event) })" />
-            </label>
+            @if (m.shared) {
+              <p class="hint">{{ m.shared }}</p>
+            }
+            @for (g of m.groups; track g.name) {
+              <details [open]="g.open">
+                <summary>{{ g.name }}</summary>
+                @for (x of g.fields; track x.f.key) {
+                  <label class="field" [title]="x.f.title ?? ''">
+                    <span>
+                      {{ x.f.label }}
+                      @if (x.f.traced === false) {
+                        <sup class="not-traced" title="Ray tracing leaves this out">†</sup>
+                      }
+                    </span>
+                    @switch (x.f.kind) {
+                      @case ('color') {
+                        <input type="color" [value]="x.value" (input)="setField(p.id, x.f.key, value($event), m.slot)" />
+                      }
+                      @case ('slider') {
+                        <span class="slider-field">
+                          <input
+                            type="range"
+                            [min]="x.f.min"
+                            [max]="x.f.max"
+                            [step]="x.f.step"
+                            [value]="x.value"
+                            [attr.aria-label]="x.f.label"
+                            (input)="setField(p.id, x.f.key, num($event), m.slot)" />
+                          <span class="slider-value">{{ x.value }}</span>
+                        </span>
+                      }
+                      @case ('number') {
+                        <input
+                          class="input num"
+                          type="number"
+                          [min]="x.f.min"
+                          [max]="x.f.max"
+                          [step]="x.f.step"
+                          [value]="x.value"
+                          [attr.aria-label]="x.f.label"
+                          (change)="setField(p.id, x.f.key, num($event), m.slot)" />
+                      }
+                      @case ('bool') {
+                        <input type="checkbox" [checked]="x.value" (change)="setField(p.id, x.f.key, checked($event), m.slot)" />
+                      }
+                      @case ('side') {
+                        <select class="input" (change)="setField(p.id, x.f.key, +value($event), m.slot)">
+                          @for (side of sides; track side.value) {
+                            <option [value]="side.value" [selected]="side.value === x.value">{{ side.label }}</option>
+                          }
+                        </select>
+                      }
+                    }
+                  </label>
+                }
+              </details>
+            }
+            @if (m.note) {
+              <p class="hint">{{ m.note }}</p>
+            }
           </fieldset>
         }
 
@@ -306,6 +381,10 @@ export class PropertiesPanel {
   protected readonly count = computed(() => this.ids().length);
 
   protected readonly operations = SOLID_OPERATIONS;
+  protected readonly materialTypes = MATERIAL_TYPES;
+  protected readonly sides = SIDES;
+  /** Which of an object's materials is shown, where it has several; back to the first for each new selection. */
+  protected readonly slot = linkedSignal({ source: () => this.ids()[0], computation: () => 0 });
   protected readonly axes = [0, 1, 2] as const;
   protected readonly axisNames = ['X', 'Y', 'Z'];
   protected readonly transformRows = [
@@ -321,9 +400,7 @@ export class PropertiesPanel {
     const o = this.doc.get(ids[0]);
     if (!o) return null;
     // A solid's material is its operands'; the first stands for them all.
-    const firstOperand = isSolid(o) ? operandMeshes(o)[0] : undefined;
-    const mats = materialsOf(firstOperand ?? o);
-    const m = mats[0] as THREE.MeshStandardMaterial | undefined;
+    const owners = this.doc.materialOwners(o);
     const light = (o as THREE.Light).isLight ? (o as THREE.Light) : null;
     const geo = (o as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
     return {
@@ -335,15 +412,7 @@ export class PropertiesPanel {
       position: o.position.toArray().map(v => round(v)) as Vec,
       rotation: [o.rotation.x, o.rotation.y, o.rotation.z].map(v => round(THREE.MathUtils.radToDeg(v), 2)) as Vec,
       scale: o.scale.toArray().map(v => round(v)) as Vec,
-      material: m
-        ? {
-            color: m.color ? `#${m.color.getHexString()}` : '#ffffff',
-            roughness: m instanceof THREE.MeshStandardMaterial ? m.roughness : null,
-            metalness: m instanceof THREE.MeshStandardMaterial ? m.metalness : null,
-            opacity: m.opacity,
-            wireframe: !!m.wireframe,
-          }
-        : null,
+      material: owners.length ? this.materialProps(o, owners) : null,
       light: light ? lightProps(light) : null,
       geometry: geo?.attributes?.['position']
         ? {
@@ -407,6 +476,48 @@ export class PropertiesPanel {
     }
   }
 
+  /** The material of an object, or of the shapes of a solid, for the panel. */
+  private materialProps(o: THREE.Object3D, owners: THREE.Object3D[]): MaterialProps {
+    const all = materialsOf(owners[0]);
+    const slot = isSolid(o) ? 0 : Math.min(this.slot(), all.length - 1);
+    const m = all[slot];
+    const t = materialType(m);
+    const fields = fieldsOf(m).map(f => ({ f, value: readField(m, f) }));
+    const groups = MATERIAL_GROUPS.map((name, i) => ({ name, open: i < 2, fields: fields.filter(x => x.f.group === name) })).filter(g => g.fields.length);
+    let users = 0;
+    this.doc.scene.traverse(c => {
+      if (!isSolidResult(c) && materialsOf(c).includes(m)) users++;
+    });
+    return {
+      slots: isSolid(o) ? [] : all.map((x, i) => ({ index: i, label: `${i + 1}: ${x.name || materialType(x)?.label || x.type}` })),
+      slot,
+      type: m.type,
+      about: t?.about ?? m.type,
+      convertible: !!t && !!(o as THREE.Mesh).isMesh || (isSolid(o) && !!t),
+      shared: isSolid(o)
+        ? `Changes apply to all ${owners.length} shapes of this solid.`
+        : users > 1
+          ? `Shared with ${users - 1} other object${users > 2 ? 's' : ''}: changes apply to them too.`
+          : '',
+      groups,
+      note:
+        m.type === 'MeshNormalMaterial'
+          ? 'Ray tracing shades this as a Lambert material.'
+          : groups.some(g => g.fields.some(x => x.f.traced === false))
+            ? '† Ray tracing leaves this setting out.'
+            : '',
+    };
+  }
+
+  protected setField(id: string, key: string, value: FieldValue, slot: number): void {
+    if (typeof value === 'number' && !Number.isFinite(value)) return;
+    this.doc.setMaterialField([id], key, value, slot);
+  }
+
+  protected setMaterialType(id: string, type: string, slot: number): void {
+    this.doc.setMaterialType([id], type, slot);
+  }
+
   /** Aims a light: one coordinate of the point it shines at. */
   protected setTarget(id: string, target: Vec, axis: number, event: Event): void {
     const v = this.num(event);
@@ -468,15 +579,6 @@ function lightProps(light: THREE.Light): LightProps {
     l.target.updateWorldMatrix(true, false);
     out.target = l.target.getWorldPosition(new THREE.Vector3()).toArray().map(v => round(v)) as Vec;
   }
-  return out;
-}
-
-/** The meshes a solid is made of, at any depth, without results. */
-function operandMeshes(solid: THREE.Object3D): THREE.Mesh[] {
-  const out: THREE.Mesh[] = [];
-  solid.traverse(c => {
-    if ((c as THREE.Mesh).isMesh && !isSolidResult(c)) out.push(c as THREE.Mesh);
-  });
   return out;
 }
 

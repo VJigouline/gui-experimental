@@ -85,7 +85,7 @@ The JSON format is described in [Documentation/Layout-Format.md](Documentation/L
 |---|---|
 | 3D View | The scene, with its own camera. Drag to orbit, right-drag to pan, scroll to zoom. Click to select, Shift+click to add to the selection, double-click to frame. **Sizing shapes:** with a box, sphere, cylinder, cone, torus or plane selected, drag its face, edge or corner to change its size; the cursor shows what will be held. A box face changes one size, an edge two and a corner three. A cylinder's or cone's side changes the diameter, a cap or the apex the height, and a rim both. A torus's outside or inside changes its outer or inner diameter, and its front or back the thickness. The opposite side stays put; hold Ctrl to keep the centre instead. Engineering dimension lines show the sizes as they change, Snap in Edit Tools rounds them, and Esc puts the shape back. Keys: Q select, W move, E rotate, R scale, F fit, B zoom box, Delete remove, Esc deselect, G walk, L face loops, Z ray trace. Walk mode (G, or 🚶 Walk): WASD or the arrows move over the ground, Q/E go down and up, drag to look, middle-drag walks left, right, up and down, the wheel walks forward and back, Shift goes fast (3× with the keys, 5× with the mouse), Ctrl+wheel sets the speed, Esc leaves. ⚙ next to Walk opens Walk settings, for the view's normal speed in m/s and the two fast multipliers. Zoom box (⊕ Zoom, or B): drag a rectangle and the view zooms to it, keeping its direction; a click zooms in twice about that point. Its toolbar sets the view direction, grid, axes, lights (💡), wireframe, face loops and background. Face loops (⬚, or L) are the edges of solid faces and surfaces in STEP models, drawn over the faces; the button is off when the scene has none. |
 | Scene Tree | The scene's objects as a tree. Click to select; Ctrl+click and Shift+click select more. Double-click to frame, 👁 to hide. Drag a row onto another to move it inside. |
-| Properties | The selected object's name, visibility, transform, material or light, for editing; for a box, sphere, cylinder, cone, torus or plane, also its dimensions; for a light, the settings of its kind. For IFC elements, also their entity type, GlobalId, materials and property sets; for STEP parts, their product and shape item. |
+| Properties | The selected object's name, visibility, transform, material or light, for editing; for a box, sphere, cylinder, cone, torus or plane, also its dimensions; for a light, the settings of its kind; for a material, its type and settings, as three.js has them. For IFC elements, also their entity type, GlobalId, materials and property sets; for STEP parts, their product and shape item. |
 | Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights of each kind three.js has, and models (glTF, GLB, STL, OBJ, IFC, STEP). Duplicates, deletes, groups and ungroups the selection. Combines shapes into solids: union, subtract and intersect. |
 | Ray Tracing | Photorealistic images of a 3D view with MeerCADRaytracer, as on SceneEditor's Photorealistic tab. See [Ray tracing](#ray-tracing). |
 | Messages | The messages panels send each other, with their channel, sender and content. |
@@ -130,6 +130,21 @@ Shapes can be combined into solids, which are worked out with [three-bvh-csg](ht
 - **Aiming:** a directional or spot light shines at its target, which moves and turns with it. Drag the yellow ◎ of a selected light to aim it, or type the point in **Aim at**. Esc puts it back.
 - **Shadows:** directional, point and spot lights cast shadows when **Cast shadows** is ticked. New shapes cast and receive them; a directional light's shadow is fitted to the scene when it is turned on.
 - **Ray tracing** draws every kind except area lights, which it leaves out.
+
+## Materials
+
+**Properties › Material** edits the material of the selected shape, model part or solid:
+
+- **Type:** Basic, Lambert, Phong, Standard, Physical, Toon or Normal, the mesh materials three.js has. Changing it keeps the settings the two types share, such as colour, emissive colour, opacity and textures.
+- **Settings,** in groups, as the type has them:
+  - Surface: colour, and roughness and metalness, or Phong's specular colour and shininess.
+  - Emission: emissive colour and intensity.
+  - Specular: index of refraction, specular intensity and colour, and anisotropy.
+  - Clear coat, Sheen and Iridescence.
+  - Transmission, for glass: transmission, thickness, attenuation colour and distance, and dispersion.
+  - Rendering: opacity, transparency, alpha test, sides, flat shading, wireframe, and depth test and write.
+- **Several materials:** a part with several materials has a Slot list to choose one. A material shared with other objects changes for all of them, and the panel says so. For a solid, changes go to all the shapes it is made of.
+- **Ray tracing** leaves out the settings marked †, and shades Normal materials as Lambert.
 
 ## Ray tracing
 
