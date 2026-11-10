@@ -19,7 +19,7 @@ interface Props {
   rotation: Vec;
   scale: Vec;
   material: { color: string; roughness: number | null; metalness: number | null; opacity: number; wireframe: boolean } | null;
-  light: { color: string; intensity: number } | null;
+  light: LightProps | null;
   geometry: { vertices: number; triangles: number } | null;
   /** A primitive's sizes, before its scale. */
   dimensions: { name: DimensionName; label: string; value: number }[] | null;
@@ -30,6 +30,27 @@ interface Props {
   children: number;
   ifc: IfcInfo | null;
   step: { label: string; value: string }[] | null;
+}
+
+/** A light's settings; those its kind doesn't have are left out. Angles in degrees. */
+interface LightProps {
+  kind: string;
+  /** What the light is, in a few words. */
+  about: string;
+  color: string;
+  intensity: number;
+  groundColor?: string;
+  distance?: number;
+  decay?: number;
+  angle?: number;
+  penumbra?: number;
+  width?: number;
+  height?: number;
+  castShadow?: boolean;
+  /** The point it is aimed at, in world coordinates. */
+  target?: Vec;
+  /** Whether the ray tracer draws it. */
+  traced: boolean;
 }
 
 /** What MeerCADIFCImport puts in an object's userData.ifc, formatted for display. */
@@ -188,14 +209,74 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
         @if (p.light; as l) {
           <fieldset>
             <legend>Light</legend>
+            <div class="field"><span>Kind</span><span class="readonly" [title]="l.about">{{ l.kind }}</span></div>
             <label class="field">
-              <span>Colour</span>
-              <input type="color" [value]="l.color" (input)="doc.setMaterial([p.id], { color: value($event) })" />
+              <span>{{ l.groundColor !== undefined ? 'Sky colour' : 'Colour' }}</span>
+              <input type="color" [value]="l.color" (input)="doc.setLight([p.id], { color: value($event) })" />
             </label>
+            @if (l.groundColor !== undefined) {
+              <label class="field">
+                <span>Ground colour</span>
+                <input type="color" [value]="l.groundColor" (input)="doc.setLight([p.id], { groundColor: value($event) })" />
+              </label>
+            }
             <label class="field">
               <span>Intensity</span>
-              <input class="input num" type="number" min="0" step="0.1" [value]="l.intensity" (change)="doc.setMaterial([p.id], { intensity: num($event) })" />
+              <input class="input num" type="number" min="0" step="0.1" [value]="l.intensity" (change)="doc.setLight([p.id], { intensity: num($event) })" />
             </label>
+            @if (l.distance !== undefined) {
+              <label class="field" title="How far the light reaches; 0 for no limit, falling off by the decay">
+                <span>Distance</span>
+                <input class="input num" type="number" min="0" step="0.5" [value]="l.distance" (change)="doc.setLight([p.id], { distance: num($event) })" />
+              </label>
+              <label class="field" title="How the light falls off with distance; 2 is physically correct">
+                <span>Decay</span>
+                <input class="input num" type="number" min="0" max="10" step="0.1" [value]="l.decay" (change)="doc.setLight([p.id], { decay: num($event) })" />
+              </label>
+            }
+            @if (l.angle !== undefined) {
+              <label class="field" title="Half the cone's opening, from its axis, in degrees">
+                <span>Cone angle °</span>
+                <input class="input num" type="number" min="0.5" max="90" step="1" [value]="l.angle" (change)="doc.setLight([p.id], { angle: num($event) })" />
+              </label>
+              <label class="field" title="How soft the cone's edge is: 0 sharp, 1 soft all the way">
+                <span>Penumbra</span>
+                <input type="range" min="0" max="1" step="0.01" [value]="l.penumbra" (input)="doc.setLight([p.id], { penumbra: num($event) })" />
+              </label>
+            }
+            @if (l.width !== undefined) {
+              <label class="field">
+                <span>Width</span>
+                <input class="input num" type="number" min="0.001" step="0.1" [value]="l.width" (change)="doc.setLight([p.id], { width: num($event) })" />
+              </label>
+              <label class="field">
+                <span>Height</span>
+                <input class="input num" type="number" min="0.001" step="0.1" [value]="l.height" (change)="doc.setLight([p.id], { height: num($event) })" />
+              </label>
+            }
+            @if (l.target; as t) {
+              <div class="field vec" title="The point the light shines at, in the world. Drag its handle in a 3D view to aim it.">
+                <span>Aim at</span>
+                @for (axis of axes; track axis) {
+                  <input
+                    class="input num"
+                    type="number"
+                    step="0.1"
+                    [attr.aria-label]="'Aim at ' + axisNames[axis]"
+                    [value]="t[axis]"
+                    (change)="setTarget(p.id, t, axis, $event)" />
+                }
+              </div>
+            }
+            @if (l.castShadow !== undefined) {
+              <label class="field">
+                <span>Cast shadows</span>
+                <input type="checkbox" [checked]="l.castShadow" (change)="doc.setLight([p.id], { castShadow: checked($event) })" />
+              </label>
+            }
+            @if (!l.traced) {
+              <p class="hint">Ray tracing leaves this kind of light out.</p>
+            }
           </fieldset>
         }
       </form>
@@ -263,7 +344,7 @@ export class PropertiesPanel {
             wireframe: !!m.wireframe,
           }
         : null,
-      light: light ? { color: `#${light.color.getHexString()}`, intensity: round(light.intensity, 3) } : null,
+      light: light ? lightProps(light) : null,
       geometry: geo?.attributes?.['position']
         ? {
             vertices: geo.attributes['position'].count,
@@ -326,6 +407,15 @@ export class PropertiesPanel {
     }
   }
 
+  /** Aims a light: one coordinate of the point it shines at. */
+  protected setTarget(id: string, target: Vec, axis: number, event: Event): void {
+    const v = this.num(event);
+    if (!Number.isFinite(v)) return;
+    const t = [...target] as Vec;
+    t[axis] = v;
+    this.doc.setLight([id], { target: t });
+  }
+
   protected value(event: Event): string {
     return (event.target as HTMLInputElement).value;
   }
@@ -337,6 +427,48 @@ export class PropertiesPanel {
   protected checked(event: Event): boolean {
     return (event.target as HTMLInputElement).checked;
   }
+}
+
+const LIGHT_ABOUT: Record<string, [string, string]> = {
+  AmbientLight: ['Ambient', 'The same light from every way, without shadows or a position'],
+  HemisphereLight: ['Hemisphere', 'Sky colour from above, ground colour from below; its position sets which way is up'],
+  DirectionalLight: ['Directional', 'Parallel rays, like the sun, from its position towards its target'],
+  PointLight: ['Point', 'Light from one point every way, like a bulb'],
+  SpotLight: ['Spot', 'A cone of light from its position towards its target'],
+  RectAreaLight: ['Area', 'Light from a rectangle, facing along its -Z axis, like a window; for standard and physical materials'],
+};
+
+/** A light's settings, for the panel. */
+function lightProps(light: THREE.Light): LightProps {
+  const l = light as THREE.Light &
+    Partial<THREE.SpotLight & THREE.RectAreaLight & THREE.HemisphereLight & THREE.PointLight & THREE.DirectionalLight>;
+  const [kind, about] = LIGHT_ABOUT[light.type] ?? [light.type, light.type];
+  const out: LightProps = {
+    kind,
+    about,
+    color: `#${light.color.getHexString()}`,
+    intensity: round(light.intensity, 3),
+    traced: light.type !== 'RectAreaLight',
+  };
+  if (l.isHemisphereLight && l.groundColor) out.groundColor = `#${l.groundColor.getHexString()}`;
+  if (l.isPointLight || l.isSpotLight) {
+    out.distance = round(l.distance ?? 0, 3);
+    out.decay = round(l.decay ?? 2, 3);
+  }
+  if (l.isSpotLight) {
+    out.angle = round(THREE.MathUtils.radToDeg(l.angle ?? 0), 2);
+    out.penumbra = round(l.penumbra ?? 0, 3);
+  }
+  if (l.isRectAreaLight) {
+    out.width = round(l.width ?? 1, 4);
+    out.height = round(l.height ?? 1, 4);
+  }
+  if (l.isDirectionalLight || l.isPointLight || l.isSpotLight) out.castShadow = light.castShadow;
+  if ((l.isDirectionalLight || l.isSpotLight) && l.target) {
+    l.target.updateWorldMatrix(true, false);
+    out.target = l.target.getWorldPosition(new THREE.Vector3()).toArray().map(v => round(v)) as Vec;
+  }
+  return out;
 }
 
 /** The meshes a solid is made of, at any depth, without results. */

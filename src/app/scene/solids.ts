@@ -117,6 +117,8 @@ export class SolidEngine {
       result.name = 'Result';
       result.userData['helper'] = true;
       result.userData['solidResult'] = true;
+      result.castShadow = true;
+      result.receiveShadow = true;
       solid.add(result);
     }
     // A solid inside another is an operand: only the outermost result is drawn.

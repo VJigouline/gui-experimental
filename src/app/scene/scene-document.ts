@@ -4,7 +4,31 @@ import { buildGeometry, editableShape } from './primitive-edit';
 import { SOLID_OPERATIONS, SolidEngine, SolidOperation, canBeOperand, isSolid, isSolidResult, solidResult } from './solids';
 
 /** The kinds of object the editing tools can add. */
-export type PrimitiveKind = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'knot' | 'plane' | 'group' | 'point-light';
+export type PrimitiveKind = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'knot' | 'plane' | 'group' | LightKind;
+
+/** The kinds of light, as three.js has them. */
+export type LightKind = 'ambient-light' | 'hemisphere-light' | 'directional-light' | 'point-light' | 'spot-light' | 'rect-area-light';
+
+export const LIGHT_KINDS: LightKind[] = ['ambient-light', 'hemisphere-light', 'directional-light', 'point-light', 'spot-light', 'rect-area-light'];
+
+export function isLightKind(kind: PrimitiveKind): kind is LightKind {
+  return (LIGHT_KINDS as string[]).includes(kind);
+}
+
+/** Changes to a light, as the properties panel makes them. Angles in degrees; `target` in world coordinates. */
+export interface LightPatch {
+  color?: string;
+  intensity?: number;
+  groundColor?: string;
+  distance?: number;
+  decay?: number;
+  angle?: number;
+  penumbra?: number;
+  width?: number;
+  height?: number;
+  castShadow?: boolean;
+  target?: [number, number, number];
+}
 
 export interface SceneTreeNode {
   id: string;
@@ -131,6 +155,7 @@ export class SceneDocument {
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.name = 'Sun';
     sun.position.set(5, 9, 6);
+    aim(sun, new THREE.Vector3(-5, -9, -6));
     this.scene.add(hemi, sun);
   }
 
@@ -148,8 +173,7 @@ export class SceneDocument {
   /** Adds a new object, into a group or the scene. Returns its id. */
   add(kind: PrimitiveKind, parentId?: string): string {
     const o = this.make(kind);
-    if (kind !== 'group' && kind !== 'point-light' && kind !== 'plane') o.position.y = 0.5;
-    if (kind === 'point-light') o.position.set(0, 2.5, 0);
+    if (kind !== 'group' && kind !== 'plane' && !isLightKind(kind)) o.position.y = 0.5;
     let parent = (parentId && this.get(parentId)) || this.scene;
     // Into a solid, only what can be an operand; anything else goes beside it.
     if (isSolid(parent) && !canBeOperand(o)) parent = parent.parent ?? this.scene;
@@ -188,6 +212,11 @@ export class SceneDocument {
           m.geometry = m.geometry.clone();
           m.material = Array.isArray(m.material) ? m.material.map(x => x.clone()) : m.material.clone();
         }
+      });
+      // A copied light aims with its own target, not the original's.
+      copy.traverse(c => {
+        const target = c.children.find(isLightTarget);
+        if (target && 'target' in c) (c as THREE.DirectionalLight).target = target;
       });
       copy.name = this.nextName(baseName(o.name || o.type));
       copy.position.x += 0.5;
@@ -340,6 +369,65 @@ export class SceneDocument {
     this.touch();
   }
 
+  /** Changes lights: any of their colours, intensity, reach, cone, size, shadows and aim. */
+  setLight(ids: readonly string[], patch: LightPatch): void {
+    for (const o of this.objects(ids)) {
+      const l = o as THREE.Light & Partial<THREE.SpotLight & THREE.RectAreaLight & THREE.HemisphereLight>;
+      if (!l.isLight) continue;
+      const num = (v: number | undefined, min: number, max = Infinity) =>
+        v === undefined || !Number.isFinite(v) ? undefined : Math.min(Math.max(v, min), max);
+      if (patch.color) l.color.set(patch.color);
+      if (patch.groundColor && l.groundColor) l.groundColor.set(patch.groundColor);
+      const intensity = num(patch.intensity, 0);
+      if (intensity !== undefined) l.intensity = intensity;
+      const distance = num(patch.distance, 0);
+      if (distance !== undefined && 'distance' in l) l.distance = distance;
+      const decay = num(patch.decay, 0, 10);
+      if (decay !== undefined && 'decay' in l) l.decay = decay;
+      const angle = num(patch.angle, 0.5, 90);
+      if (angle !== undefined && l.isSpotLight) l.angle = THREE.MathUtils.degToRad(angle);
+      const penumbra = num(patch.penumbra, 0, 1);
+      if (penumbra !== undefined && l.isSpotLight) l.penumbra = penumbra;
+      const width = num(patch.width, 1e-3);
+      if (width !== undefined && 'width' in l) l.width = width;
+      const height = num(patch.height, 1e-3);
+      if (height !== undefined && 'height' in l) l.height = height;
+      if (patch.castShadow !== undefined && l.shadow) {
+        l.castShadow = patch.castShadow;
+        if (patch.castShadow) this.fitShadow(l as unknown as ShadowLight);
+      }
+      if (patch.target && patch.target.every(Number.isFinite)) this.aimAt(l, new THREE.Vector3(...patch.target));
+    }
+    this.touch();
+  }
+
+  /** Points a directional or spot light at a point in the world, keeping where it is. */
+  aimAt(light: THREE.Object3D, world: THREE.Vector3): void {
+    const l = light as THREE.DirectionalLight;
+    if (!l.target) return;
+    l.updateMatrixWorld(true);
+    // Not onto the light itself: a light can't point at where it is.
+    if (world.distanceTo(l.getWorldPosition(new THREE.Vector3())) < 1e-6) return;
+    aim(l, l.worldToLocal(world.clone()));
+  }
+
+  /** Shadows sharp enough for the scene: a directional light's shadow covers what is in the scene. */
+  private fitShadow(light: ShadowLight): void {
+    light.shadow.mapSize.set(2048, 2048);
+    light.shadow.bias = -0.0005;
+    light.shadow.map?.dispose();
+    light.shadow.map = null;
+    const cam = light.shadow.camera as THREE.OrthographicCamera;
+    if (!(light as THREE.DirectionalLight).isDirectionalLight || !cam.isOrthographicCamera) return;
+    const box = this.bounds();
+    const r = box.isEmpty() ? 5 : Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 0.1);
+    cam.left = cam.bottom = -r;
+    cam.right = cam.top = r;
+    cam.near = 0.01;
+    cam.far = Math.max(r * 4, light.position.length() + r * 2);
+    cam.updateProjectionMatrix();
+  }
+
   /** Changes material properties of meshes, or the colour and intensity of lights. */
   setMaterial(
     ids: readonly string[],
@@ -419,11 +507,40 @@ export class SceneDocument {
       case 'group':
         o = new THREE.Group();
         break;
-      case 'point-light': {
-        const light = new THREE.PointLight(0xffffff, 8, 0, 2);
-        o = light;
+      case 'ambient-light':
+        o = new THREE.AmbientLight(0xffffff, 0.4);
+        break;
+      case 'hemisphere-light':
+        // Lit from the sky above its position, and from the ground below.
+        o = new THREE.HemisphereLight(0xdde6ff, 0x30302a, 1);
+        o.position.set(0, 3, 0);
+        break;
+      case 'directional-light':
+        o = new THREE.DirectionalLight(0xffffff, 1.5);
+        o.position.set(3, 5, 2);
+        aim(o as THREE.DirectionalLight, new THREE.Vector3(-3, -5, -2));
+        break;
+      case 'point-light':
+        o = new THREE.PointLight(0xffffff, 8, 0, 2);
+        o.position.set(0, 2.5, 0);
+        break;
+      case 'spot-light':
+        o = new THREE.SpotLight(0xffffff, 20, 0, Math.PI / 6, 0.25, 2);
+        o.position.set(2, 3, 2);
+        aim(o as THREE.SpotLight, new THREE.Vector3(-2, -3, -2));
+        break;
+      case 'rect-area-light': {
+        // A panel facing down, lighting what is below it.
+        const panel = new THREE.RectAreaLight(0xffffff, 5, 1.5, 0.75);
+        panel.position.set(0, 2.5, 0);
+        panel.rotation.x = -Math.PI / 2;
+        o = panel;
         break;
       }
+    }
+    if ((o as THREE.Mesh).isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
     }
     o.name = this.nextName(NAMES[kind]);
     return o;
@@ -445,8 +562,35 @@ const NAMES: Record<PrimitiveKind, string> = {
   knot: 'Knot',
   plane: 'Plane',
   group: 'Group',
+  'ambient-light': 'Ambient light',
+  'hemisphere-light': 'Hemisphere light',
+  'directional-light': 'Directional light',
   'point-light': 'Point light',
+  'spot-light': 'Spot light',
+  'rect-area-light': 'Area light',
 };
+
+type ShadowLight = THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight;
+
+/** The object a directional or spot light points at: a child of the light, so it moves and turns with it. */
+export function isLightTarget(o: THREE.Object3D): boolean {
+  return o.userData['lightTarget'] === true;
+}
+
+/** Points a light at a point in its own coordinates, with a target that is a child of it. */
+function aim(light: THREE.DirectionalLight | THREE.SpotLight, local: THREE.Vector3): void {
+  let target = light.children.find(isLightTarget);
+  if (!target) {
+    target = new THREE.Object3D();
+    target.name = 'Target';
+    target.userData['helper'] = true;
+    target.userData['lightTarget'] = true;
+    light.add(target);
+  }
+  target.position.copy(local);
+  target.updateMatrixWorld(true);
+  light.target = target;
+}
 
 /** Objects that belong to the document, as opposed to helpers a view adds. */
 export function isDocumentObject(o: THREE.Object3D): boolean {

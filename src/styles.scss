@@ -1158,6 +1158,13 @@ body.resizing-row canvas {
     letter-spacing: 0.4px;
   }
 
+  .tool-subhead {
+    margin: 8px 0 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
   .file-btn {
     margin-top: 8px;
   }

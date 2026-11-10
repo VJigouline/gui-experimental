@@ -3,7 +3,7 @@ import { ToolMode, channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { MODEL_EXTENSIONS } from '../../scene/model-import';
 import { ModelImportService } from '../../scene/model-import.service';
-import { PrimitiveKind, SceneDocument } from '../../scene/scene-document';
+import { LightKind, PrimitiveKind, SceneDocument } from '../../scene/scene-document';
 import { SOLID_OPERATIONS, SolidOperation, canBeOperand } from '../../scene/solids';
 import { SelectValue } from '../../ui/select-value';
 
@@ -23,7 +23,16 @@ const PRIMITIVES: { kind: PrimitiveKind; label: string; icon: string }[] = [
   { kind: 'knot', label: 'Knot', icon: '∞' },
   { kind: 'plane', label: 'Plane', icon: '▱' },
   { kind: 'group', label: 'Group', icon: '▣' },
-  { kind: 'point-light', label: 'Light', icon: '☀' },
+];
+
+/** The lights three.js has. */
+const LIGHTS: { kind: LightKind; label: string; icon: string; title: string }[] = [
+  { kind: 'ambient-light', label: 'Ambient', icon: '◌', title: 'Ambient light: the same from every way, without shadows' },
+  { kind: 'hemisphere-light', label: 'Hemisphere', icon: '◓', title: 'Hemisphere light: sky colour from above, ground colour from below' },
+  { kind: 'directional-light', label: 'Directional', icon: '☀', title: 'Directional light: parallel rays, like the sun, at its target' },
+  { kind: 'point-light', label: 'Point', icon: '✺', title: 'Point light: from one point, every way, like a bulb' },
+  { kind: 'spot-light', label: 'Spot', icon: '🔦', title: 'Spot light: a cone from one point, at its target' },
+  { kind: 'rect-area-light', label: 'Area', icon: '▭', title: 'Area light: from a rectangle, like a window or a panel' },
 ];
 
 /**
@@ -75,6 +84,14 @@ const PRIMITIVES: { kind: PrimitiveKind; label: string; icon: string }[] = [
         @for (p of primitives; track p.kind) {
           <button type="button" class="tool-btn big" [title]="'Add a ' + p.label.toLowerCase()" (click)="add(p.kind)">
             <span class="tool-icon">{{ p.icon }}</span>{{ p.label }}
+          </button>
+        }
+      </div>
+      <h4 class="tool-subhead">Lights</h4>
+      <div class="button-grid">
+        @for (l of lights; track l.kind) {
+          <button type="button" class="tool-btn big" [title]="l.title" (click)="add(l.kind)">
+            <span class="tool-icon">{{ l.icon }}</span>{{ l.label }}
           </button>
         }
       </div>
@@ -132,6 +149,7 @@ export class ToolsPanel {
 
   protected readonly modes = MODES;
   protected readonly primitives = PRIMITIVES;
+  protected readonly lights = LIGHTS;
   protected readonly snaps = [0.1, 0.25, 0.5, 1];
   protected readonly views = [
     { view: 'iso', label: 'Iso' },

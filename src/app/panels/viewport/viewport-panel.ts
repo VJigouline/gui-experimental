@@ -2,6 +2,8 @@ import { Component, DestroyRef, ElementRef, afterNextRender, computed, effect, i
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { RectAreaLightHelper } from 'three/examples/jsm/helpers/RectAreaLightHelper.js';
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { ToolMode, ViewName } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { MenuService } from '../../ui/menu/menu.service';
@@ -92,6 +94,15 @@ export const BACKGROUNDS = [
       <span class="tool-sep"></span>
       <button type="button" class="tool-btn" [class.on]="grid()" title="Grid" (click)="toggle('grid')">#</button>
       <button type="button" class="tool-btn" [class.on]="axes()" title="Axes" (click)="toggle('axes')">⊹</button>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="lightHelpers()"
+        [attr.aria-pressed]="lightHelpers()"
+        title="Lights: show where lights are and where they shine; click one to select it, drag a selected light's ◎ to aim it"
+        (click)="toggle('lightHelpers')">
+        💡
+      </button>
       <button type="button" class="tool-btn" [class.on]="wireframe()" title="Wireframe" (click)="toggle('wireframe')">◇</button>
       <button
         type="button"
@@ -132,7 +143,7 @@ export const BACKGROUNDS = [
       @if (tracing()) {
         Ray traced · {{ traceStatus() }}
       } @else if (editInfo(); as info) {
-        {{ info }} · Ctrl keeps the centre · Esc cancels
+        {{ info }}
       } @else if (zoomBox()) {
         Zoom box · drag a rectangle to zoom to it, or click to zoom in · Esc cancels
       } @else if (walking()) {
@@ -156,6 +167,8 @@ export class ViewportPanel {
   protected readonly error = signal<string | null>(null);
   protected readonly grid = this.panel.state('grid', true);
   protected readonly axes = this.panel.state('axes', false);
+  /** Show lights: where they are, which way they shine, their cones and panels. */
+  protected readonly lightHelpers = this.panel.state('lightHelpers', true);
   protected readonly wireframe = this.panel.state('wireframe', false);
   /** Show the boundary loops of B-rep faces and surfaces, where the scene has them. */
   protected readonly loops = this.panel.state('loops', true);
@@ -241,6 +254,7 @@ export class ViewportPanel {
       this.axes();
       this.wireframe();
       this.loops();
+      this.lightHelpers();
       this.background();
       this.theme.dark();
       untracked(() => this.requestRender());
@@ -270,6 +284,11 @@ export class ViewportPanel {
       return;
     }
     this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+    // Lights that are set to cast shadows do, softly.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Area lights need their tables, once.
+    initAreaLights();
     this.renderer.autoClear = false;
     container.appendChild(this.renderer.domElement);
 
@@ -350,6 +369,10 @@ export class ViewportPanel {
     this.gizmo?.dispose();
     this.orbit?.dispose();
     this.boxes.forEach(b => b.dispose());
+    this.helpers.forEach(h => disposeHelper(h));
+    this.aimMarker.geometry.dispose();
+    (this.aimMarker.material as THREE.Material).dispose();
+    this.aiming?.cancel();
     this.gridHelper.dispose();
     this.axesHelper.dispose();
     this.wireMaterial.dispose();
@@ -392,6 +415,7 @@ export class ViewportPanel {
       r.render(scene, this.camera);
       scene.overrideMaterial = null;
       this.drawOperandGhosts(r);
+      this.updateLightHelpers();
       r.render(this.overlay, this.camera);
     }
     this.drawDimensions();
@@ -564,8 +588,8 @@ export class ViewportPanel {
     );
   }
 
-  protected toggle(key: 'grid' | 'axes' | 'wireframe' | 'loops'): void {
-    const current = { grid: this.grid, axes: this.axes, wireframe: this.wireframe, loops: this.loops }[key]();
+  protected toggle(key: 'grid' | 'axes' | 'wireframe' | 'loops' | 'lightHelpers'): void {
+    const current = { grid: this.grid, axes: this.axes, wireframe: this.wireframe, loops: this.loops, lightHelpers: this.lightHelpers }[key]();
     this.panel.setState({ [key]: !current });
   }
 
@@ -625,6 +649,9 @@ export class ViewportPanel {
   };
 
   private pick(e: MouseEvent): string | null {
+    // A light near the pointer, where lights are shown.
+    const light = this.pickLight(e);
+    if (light) return light;
     const o = this.firstHit(this.rayAt(e))?.object;
     // A solid's result stands for the solid.
     return o ? (isSolidResult(o) ? o.parent!.uuid : o.uuid) : null;
@@ -656,6 +683,11 @@ export class ViewportPanel {
   }
 
   protected onKey(e: KeyboardEvent): void {
+    if (this.aiming) {
+      if (e.key === 'Escape') this.aiming.cancel();
+      e.preventDefault();
+      return;
+    }
     if (this.edit) {
       // While sizing a shape: Esc puts it back, Ctrl switches to keeping the centre.
       if (e.key === 'Escape') this.edit.cancel();
@@ -698,6 +730,168 @@ export class ViewportPanel {
       return;
     }
     e.preventDefault();
+  }
+
+  // ------------------------------------------------------------ lights
+
+  /** Helpers that show lights, by light. */
+  private readonly helpers = new Map<THREE.Light, LightHelper>();
+  /** Handles at the targets of selected directional and spot lights, to aim them by. */
+  private readonly aimMarker = (() => {
+    const p = new THREE.Points(
+      new THREE.BufferGeometry(),
+      new THREE.PointsMaterial({ color: 0xffd400, size: 11, sizeAttenuation: false, depthTest: false, transparent: true }),
+    );
+    p.userData['helper'] = true;
+    p.renderOrder = 10;
+    this.overlay.add(p);
+    return p;
+  })();
+  /** The light being aimed, while the button is down. */
+  private aiming: { cancel(): void } | null = null;
+
+  /** The lights in the scene that are shown, not counting ambient light, which is everywhere. */
+  private shownLights(): THREE.Light[] {
+    const out: THREE.Light[] = [];
+    this.doc.scene.traverse(o => {
+      const l = o as THREE.Light;
+      if (l.isLight && !(l as THREE.AmbientLight).isAmbientLight && isShown(l)) out.push(l);
+    });
+    return out;
+  }
+
+  /** Keeps a helper for each light, as three.js draws them, and the aim handles of selected lights. */
+  private updateLightHelpers(): void {
+    const lights = this.lightHelpers() ? this.shownLights() : [];
+    const keep = new Set(lights);
+    for (const [light, helper] of this.helpers) {
+      if (!keep.has(light)) {
+        helper.removeFromParent();
+        disposeHelper(helper);
+        this.helpers.delete(light);
+      }
+    }
+    for (const light of lights) {
+      let helper = this.helpers.get(light);
+      if (!helper) {
+        helper = makeLightHelper(light) ?? undefined;
+        if (!helper) continue;
+        helper.userData['helper'] = true;
+        this.helpers.set(light, helper);
+        this.overlay.add(helper);
+      }
+      (helper as { update?: () => void }).update?.();
+      // A spot light without a reach is drawn out to its target, not 1000 units long.
+      const spot = light as THREE.SpotLight;
+      if (spot.isSpotLight && !spot.distance) {
+        const length = Math.max(spot.getWorldPosition(new THREE.Vector3()).distanceTo(spot.target.getWorldPosition(new THREE.Vector3())), 0.1);
+        (helper as THREE.SpotLightHelper).cone.scale.set(length * Math.tan(spot.angle), length * Math.tan(spot.angle), length);
+      }
+    }
+    // Aim handles for selected lights with targets.
+    const points: number[] = [];
+    if (this.lightHelpers()) {
+      for (const o of this.doc.objects(this.selection()?.ids)) {
+        const target = (o as THREE.DirectionalLight).target;
+        if (!(o as THREE.Light).isLight || !target || !isShown(o)) continue;
+        points.push(...target.getWorldPosition(new THREE.Vector3()).toArray());
+      }
+    }
+    this.aimMarker.geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    this.aimMarker.geometry.computeBoundingSphere();
+    this.aimMarker.visible = points.length > 0;
+  }
+
+  /** The id of the light nearest the pointer, within a few pixels, while lights are shown. */
+  private pickLight(e: MouseEvent): string | null {
+    if (!this.lightHelpers() || !this.renderer) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    let best: THREE.Light | null = null;
+    let bestD = 12;
+    for (const light of this.shownLights()) {
+      const p = this.worldToScreen(light.getWorldPosition(new THREE.Vector3()));
+      if (!p) continue;
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestD) {
+        best = light;
+        bestD = d;
+      }
+    }
+    return best?.uuid ?? null;
+  }
+
+  /** A world point in pixels in the view, or null behind the camera. */
+  private worldToScreen(p: THREE.Vector3): { x: number; y: number } | null {
+    const canvas = this.renderer!.domElement;
+    const v = p.clone().project(this.camera);
+    if (v.z > 1 || v.z < -1) return null;
+    return { x: ((v.x + 1) / 2) * canvas.clientWidth, y: ((1 - v.y) / 2) * canvas.clientHeight };
+  }
+
+  /** The selected light whose aim handle is under the pointer. */
+  private aimHandleAt(e: MouseEvent): THREE.DirectionalLight | THREE.SpotLight | null {
+    if (!this.lightHelpers() || !this.renderer || this.walking() || this.zoomBox()) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    for (const o of this.doc.objects(this.selection()?.ids)) {
+      const l = o as THREE.DirectionalLight | THREE.SpotLight;
+      if (!l.isLight || !l.target || !isShown(l)) continue;
+      const p = this.worldToScreen(l.target.getWorldPosition(new THREE.Vector3()));
+      if (p && Math.hypot(p.x - (e.clientX - rect.left), p.y - (e.clientY - rect.top)) <= 9) return l;
+    }
+    return null;
+  }
+
+  /**
+   * Aims a light by dragging its handle: the target follows the pointer over the plane through it
+   * that faces the camera. Esc puts it back.
+   */
+  private startAim(e: PointerEvent, light: THREE.DirectionalLight | THREE.SpotLight): void {
+    const canvas = this.renderer!.domElement;
+    canvas.setPointerCapture?.(e.pointerId);
+    const start = light.target.getWorldPosition(new THREE.Vector3());
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this.camera.getWorldDirection(new THREE.Vector3()), start);
+    const grab = this.rayAt(e).ray.intersectPlane(plane, new THREE.Vector3()) ?? start.clone();
+    let moved = false;
+    const show = () => {
+      const t = light.target.getWorldPosition(new THREE.Vector3());
+      this.editInfo.set(`Aiming ${light.name} at ${t.toArray().map(v => formatLength(v)).join(', ')} · Esc cancels`);
+    };
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= 3) return;
+      moved = true;
+      const p = this.rayAt(ev).ray.intersectPlane(plane, new THREE.Vector3());
+      if (!p) return;
+      this.doc.aimAt(light, start.clone().add(p.sub(grab)));
+      this.doc.touch();
+      show();
+    };
+    const finish = () => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', cancel);
+      if (canvas.hasPointerCapture?.(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      this.aiming = null;
+      this.editInfo.set(null);
+      this.requestRender();
+    };
+    const up = (ev: PointerEvent) => {
+      finish();
+      if (!moved) this.selectAt(ev);
+    };
+    const cancel = () => {
+      finish();
+      if (moved) {
+        this.doc.aimAt(light, start);
+        this.doc.touch();
+      }
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', cancel);
+    this.aiming = { cancel };
+    show();
   }
 
   // ------------------------------------------------------------ sizing shapes
@@ -746,10 +940,20 @@ export class ViewportPanel {
     return new THREE.Vector3(world / scale.x, world / scale.y, world / scale.z);
   }
 
-  /** Presses on a selected shape size it, before orbiting or the gizmo can take the press. */
+  /**
+   * Presses on a selected shape size it, and on a selected light's aim handle aim it, before
+   * orbiting or the gizmo can take the press.
+   */
   private readonly onEditPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0 || e.target !== this.renderer?.domElement || this.edit) return;
+    if (e.button !== 0 || e.target !== this.renderer?.domElement || this.edit || this.aiming) return;
     if (this.gizmo?.object && this.gizmo.axis !== null) return;
+    const aimed = this.aimHandleAt(e);
+    if (aimed) {
+      e.stopPropagation();
+      this.containerRef().nativeElement.focus({ preventScroll: true });
+      this.startAim(e, aimed);
+      return;
+    }
     const target = this.editTarget(e);
     if (!target) return;
     e.stopPropagation();
@@ -760,11 +964,15 @@ export class ViewportPanel {
   /** Shows what a press would hold, with the cursor. */
   private readonly onHover = (e: PointerEvent) => {
     const canvas = this.renderer?.domElement;
-    if (!canvas || this.edit || e.buttons) return;
+    if (!canvas || this.edit || this.aiming || e.buttons) return;
     let cursor = '';
     if (!(this.gizmo?.object && this.gizmo.axis !== null)) {
-      const t = this.editTarget(e);
-      if (t) cursor = this.cursorFor(t.mesh, t.handle);
+      if (this.aimHandleAt(e)) cursor = 'crosshair';
+      else {
+        const t = this.editTarget(e);
+        if (t) cursor = this.cursorFor(t.mesh, t.handle);
+        else if (this.pickLight(e)) cursor = 'pointer';
+      }
     }
     if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
   };
@@ -912,7 +1120,7 @@ export class ViewportPanel {
     const bg = this.backgroundColour();
     this.dimColour.set(isLight(bg) ? '#0b57d0' : '#ffd400');
     this.dimHalo.set(bg);
-    this.editInfo.set(draws.length ? `${mesh.name}: ${draws.map(d => `${DIMENSION_NAMES[d.name]} ${d.label}`).join(', ')}` : `Sizing ${mesh.name}`);
+    this.editInfo.set((draws.length ? `${mesh.name}: ${draws.map(d => `${DIMENSION_NAMES[d.name]} ${d.label}`).join(', ')}` : `Sizing ${mesh.name}`) + ' · Ctrl keeps the centre · Esc cancels');
   }
 
   /** A dimension in pixels: its lines, arrowheads and label, or null if seen end on. */
@@ -1351,6 +1559,33 @@ function isLight(colour: string): boolean {
   } catch {
     return false;
   }
+}
+
+type LightHelper = THREE.Object3D & { dispose?: () => void };
+
+/** three.js's helper for a light, sized to suit the default scene. */
+function makeLightHelper(light: THREE.Light): LightHelper | null {
+  const l = light as THREE.Light & Record<string, boolean>;
+  if (l['isDirectionalLight']) return new THREE.DirectionalLightHelper(light as THREE.DirectionalLight, 0.4);
+  if (l['isSpotLight']) return new THREE.SpotLightHelper(light as THREE.SpotLight);
+  if (l['isPointLight']) return new THREE.PointLightHelper(light as THREE.PointLight, 0.12);
+  if (l['isHemisphereLight']) return new THREE.HemisphereLightHelper(light as THREE.HemisphereLight, 0.25);
+  if (l['isRectAreaLight']) return new RectAreaLightHelper(light as THREE.RectAreaLight);
+  return null;
+}
+
+function disposeHelper(h: LightHelper): void {
+  h.removeFromParent();
+  h.dispose?.();
+}
+
+let areaLightsReady = false;
+
+/** Area lights need lookup tables for standard and physical materials, set up once. */
+function initAreaLights(): void {
+  if (areaLightsReady) return;
+  RectAreaLightUniformsLib.init();
+  areaLightsReady = true;
 }
 
 /** The layer selected operands are put on for a moment, to draw them as ghosts. */
