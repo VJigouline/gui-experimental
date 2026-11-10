@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { IfcImportSettings } from '../../scene/ifc-settings';
 import { StepImportSettings } from '../../scene/step-settings';
+import { WalkSettings } from '../../panels/viewport/walk-settings';
 
 export type DialogRequest =
   | { kind: 'prompt'; title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void }
@@ -8,6 +9,7 @@ export type DialogRequest =
   | { kind: 'message'; title: string; message: string; resolve: () => void }
   | { kind: 'ifc-options'; files: string[]; settings: IfcImportSettings; settingsOnly: boolean; resolve: (v: IfcImportSettings | null) => void }
   | { kind: 'step-options'; files: string[]; settings: StepImportSettings; settingsOnly: boolean; resolve: (v: StepImportSettings | null) => void }
+  | { kind: 'walk-options'; settings: WalkSettings; baseSpeed: number; resolve: (v: WalkSettings | null) => void }
   | { kind: 'busy'; title: string; message: string }
   | { kind: 'layout-json' }
   | { kind: 'layouts' }
@@ -44,6 +46,14 @@ export class DialogService {
    */
   stepOptions(files: string[], settings: StepImportSettings, settingsOnly = false): Promise<StepImportSettings | null> {
     return new Promise(resolve => this.current.set({ kind: 'step-options', files, settings, settingsOnly, resolve }));
+  }
+
+  /**
+   * Edits a view's walking speeds. `baseSpeed` is the speed for the scene's size in m/s, which
+   * `settings.speed` multiplies. Resolves with the new settings, or `null` if cancelled.
+   */
+  walkOptions(settings: WalkSettings, baseSpeed: number): Promise<WalkSettings | null> {
+    return new Promise(resolve => this.current.set({ kind: 'walk-options', settings, baseSpeed, resolve }));
   }
 
   /** Shows a message that can't be dismissed, until `close` or another dialog replaces it. */

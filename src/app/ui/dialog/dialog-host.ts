@@ -4,6 +4,7 @@ import { LayoutService } from '../../core/layout/layout.service';
 import { LayoutError } from '../../core/layout/layout.parse';
 import { IfcImportSettings, defaultIfcSettings } from '../../scene/ifc-settings';
 import { STEP_QUALITY, StepImportSettings, defaultStepSettings } from '../../scene/step-settings';
+import { WALK_FAST, WALK_SPEED, WalkSettings, clampWalk, defaultWalkSettings } from '../../panels/viewport/walk-settings';
 import { SelectValue } from '../select-value';
 import { downloadText, readTextFile } from '../files';
 import { DialogRequest, DialogService } from './dialog.service';
@@ -149,6 +150,50 @@ import { DialogRequest, DialogService } from './dialog.service';
             </div>
           </form>
         }
+        @case ('walk-options') {
+          @let r = asWalk();
+          @let o = walk();
+          <form class="ifc-dialog" (submit)="submitWalk($event)">
+            <h2>Walk settings</h2>
+            <p class="hint">For this view. Ctrl+wheel also changes the normal speed while walking.</p>
+            <div class="props">
+              <fieldset>
+                <legend>Normal</legend>
+                <label class="field" title="Walking speed without Shift, in metres a second. It starts from a speed that suits the scene's size.">
+                  <span>Speed</span>
+                  <span class="range">
+                    <input
+                      class="input num"
+                      type="number"
+                      [min]="walkMps(walkLimits.min, r.baseSpeed)"
+                      [max]="walkMps(walkLimits.max, r.baseSpeed)"
+                      step="any"
+                      [value]="walkMps(o.speed, r.baseSpeed)"
+                      (change)="setWalkMps(num($event), r.baseSpeed)" />
+                    <output>m/s</output>
+                  </span>
+                </label>
+              </fieldset>
+              <fieldset>
+                <legend>Fast (Shift held)</legend>
+                <label class="field" title="Shift multiplies the speed of WASD, Q/E and the arrows by this.">
+                  <span>Keys</span>
+                  <span class="range"><input type="range" [min]="fastLimits.min" [max]="fastLimits.max" step="0.5" [value]="o.fastKeys" (input)="setWalk({ fastKeys: num($event) })" /><output>{{ o.fastKeys }}×, {{ walkMps(o.speed * o.fastKeys, r.baseSpeed) }} m/s</output></span>
+                </label>
+                <label class="field" title="Shift multiplies the speed of middle-drag and the wheel by this.">
+                  <span>Mouse</span>
+                  <span class="range"><input type="range" [min]="fastLimits.min" [max]="fastLimits.max" step="0.5" [value]="o.fastMouse" (input)="setWalk({ fastMouse: num($event) })" /><output>{{ o.fastMouse }}×</output></span>
+                </label>
+              </fieldset>
+            </div>
+            <div class="dialog-buttons">
+              <button type="button" class="btn" (click)="walk.set(walkDefaults())">Defaults</button>
+              <span class="spacer"></span>
+              <button type="button" class="btn" (click)="close()">Cancel</button>
+              <button type="submit" class="btn primary" autofocus>Save</button>
+            </div>
+          </form>
+        }
         @case ('busy') {
           @let r = asBusy();
           <div class="busy" role="status" aria-live="polite">
@@ -247,7 +292,7 @@ import { DialogRequest, DialogService } from './dialog.service';
             <ul>
               <li>Drag to orbit, right-drag to pan, scroll to zoom. Click to select; <kbd>Shift</kbd>+click to add.</li>
               <li><kbd>Q</kbd> select, <kbd>W</kbd> move, <kbd>E</kbd> rotate, <kbd>R</kbd> scale, <kbd>F</kbd> fit, <kbd>Delete</kbd> remove, <kbd>Esc</kbd> deselect.</li>
-              <li><kbd>G</kbd>, or 🚶 Walk, walks through the scene: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrows move, <kbd>Q</kbd>/<kbd>E</kbd> go down and up, drag to look, drag with the middle button to walk left, right, up and down, and turn the wheel to walk forward and back. Hold <kbd>Shift</kbd> to run; <kbd>Ctrl</kbd>+wheel sets the speed. <kbd>Esc</kbd> or <kbd>G</kbd> goes back to orbiting.</li>
+              <li><kbd>G</kbd>, or 🚶 Walk, walks through the scene: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or the arrows move, <kbd>Q</kbd>/<kbd>E</kbd> go down and up, drag to look, drag with the middle button to walk left, right, up and down, and turn the wheel to walk forward and back. Hold <kbd>Shift</kbd> to go fast: 3× with the keys, 5× with the mouse. <kbd>Ctrl</kbd>+wheel sets the speed, and ⚙ next to 🚶 Walk sets the normal speed and both fast multipliers. <kbd>Esc</kbd> or <kbd>G</kbd> goes back to orbiting.</li>
               <li><kbd>B</kbd>, or ⊕ Zoom, zooms to a box: drag a rectangle round what to look at, or click to zoom in there. <kbd>Esc</kbd> cancels.</li>
               <li><kbd>L</kbd>, or ⬚, shows or hides face loops: the edges of solid faces and surfaces in STEP models.</li>
               <li><kbd>Z</kbd> switches to the ray traced image and back.</li>
@@ -285,6 +330,19 @@ export class DialogHost {
   protected isStepQuality(v: number): boolean {
     return STEP_QUALITY.some(q => q.value === v);
   }
+  /** The walk settings being edited. */
+  protected readonly walk = signal<WalkSettings>(defaultWalkSettings());
+  protected readonly walkDefaults = defaultWalkSettings;
+  protected readonly walkLimits = WALK_SPEED;
+  protected readonly fastLimits = WALK_FAST;
+  /** A speed multiple in m/s, to one decimal (two below 1 m/s). */
+  protected walkMps(multiple: number, base: number): number {
+    const v = multiple * base;
+    return v < 1 ? Math.round(v * 100) / 100 : Math.round(v * 10) / 10;
+  }
+  protected setWalkMps(mps: number, base: number): void {
+    this.setWalk({ speed: clampWalk(mps / base, WALK_SPEED, this.walk().speed) });
+  }
   protected readonly json = signal('');
   protected readonly jsonError = signal('');
   protected readonly saveName = signal('');
@@ -305,6 +363,7 @@ export class DialogHost {
         if (r.kind === 'prompt') this.promptValue.set(r.value);
         if (r.kind === 'ifc-options') this.ifc.set({ ...r.settings });
         if (r.kind === 'step-options') this.step.set({ ...r.settings });
+        if (r.kind === 'walk-options') this.walk.set({ ...r.settings });
         if (r.kind === 'layout-json') this.json.set(this.layout.toJson());
         if (r.kind === 'layouts') this.saveName.set(this.layout.layout().name ?? '');
         if (!d.open) d.showModal();
@@ -325,6 +384,9 @@ export class DialogHost {
   }
   protected asStep() {
     return this.request() as Extract<DialogRequest, { kind: 'step-options' }>;
+  }
+  protected asWalk() {
+    return this.request() as Extract<DialogRequest, { kind: 'walk-options' }>;
   }
   protected asBusy() {
     return this.request() as Extract<DialogRequest, { kind: 'busy' }>;
@@ -349,10 +411,11 @@ export class DialogHost {
     if (this.request()) this.close();
   }
 
-  private settle(answer?: string | boolean | IfcImportSettings | StepImportSettings): void {
+  private settle(answer?: string | boolean | IfcImportSettings | StepImportSettings | WalkSettings): void {
     if (this.settled) return;
     this.settled = true;
     const r = this.request();
+    if (r?.kind === 'walk-options') r.resolve(typeof answer === 'object' ? (answer as WalkSettings) : null);
     if (r?.kind === 'ifc-options') r.resolve(typeof answer === 'object' ? (answer as IfcImportSettings) : null);
     else if (r?.kind === 'step-options') r.resolve(typeof answer === 'object' ? (answer as StepImportSettings) : null);
     else if (r?.kind === 'prompt') r.resolve(typeof answer === 'string' ? answer : null);
@@ -385,6 +448,16 @@ export class DialogHost {
   protected submitStep(event: Event): void {
     event.preventDefault();
     this.settle(this.step());
+    this.dialogs.close();
+  }
+
+  protected setWalk(patch: Partial<WalkSettings>): void {
+    this.walk.update(s => ({ ...s, ...patch }));
+  }
+
+  protected submitWalk(event: Event): void {
+    event.preventDefault();
+    this.settle(this.walk());
     this.dialogs.close();
   }
 

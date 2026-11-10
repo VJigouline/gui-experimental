@@ -5,6 +5,8 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { ToolMode, ViewName } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { MenuService } from '../../ui/menu/menu.service';
+import { DialogService } from '../../ui/dialog/dialog.service';
+import { WALK_FAST, WALK_SPEED, clampWalk, defaultWalkSettings } from './walk-settings';
 import { FACE_LOOPS_LAYER, SceneDocument } from '../../scene/scene-document';
 import { ThemeService } from '../../ui/theme.service';
 import { RaytraceService, describeProgress } from '../../raytrace/raytrace.service';
@@ -91,10 +93,11 @@ export const BACKGROUNDS = [
         class="tool-btn"
         [class.on]="walking()"
         [attr.aria-pressed]="walking()"
-        title="Walk: WASD to move, Q/E down and up, drag to look, middle-drag to walk sideways and up or down, wheel to walk forward and back, Shift to run, Ctrl+wheel for speed (G switches, Esc leaves)"
+        title="Walk: WASD to move, Q/E down and up, drag to look, middle-drag to walk sideways and up or down, wheel to walk forward and back, Shift to go fast, Ctrl+wheel for speed (G switches, Esc leaves)"
         (click)="setWalking(!walking())">
         🚶 Walk
       </button>
+      <button type="button" class="tool-btn" title="Walk settings: normal speed, and how much faster Shift goes with the keys and the mouse" (click)="openWalkSettings()">⚙</button>
       @if (raytraceAvailable) {
         <span class="tool-sep"></span>
         <button
@@ -114,7 +117,7 @@ export const BACKGROUNDS = [
       } @else if (zoomBox()) {
         Zoom box · drag a rectangle to zoom to it, or click to zoom in · Esc cancels
       } @else if (walking()) {
-        Walk · WASD move · Q/E down, up · drag to look · middle-drag sideways, up · wheel forward, back · Shift run · Ctrl+wheel {{ walkSpeedLabel() }} · Esc leaves
+        Walk · WASD move · Q/E down, up · drag to look · middle-drag sideways, up · wheel forward, back · Shift fast ({{ fastKeys() }}× keys, {{ fastMouse() }}× mouse) · Ctrl+wheel {{ walkSpeedLabel() }} · Esc leaves
       } @else {
         {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected
       }
@@ -125,6 +128,7 @@ export class ViewportPanel {
   private readonly panel = inject(PanelContext);
   private readonly doc = inject(SceneDocument);
   private readonly menus = inject(MenuService);
+  private readonly dialogs = inject(DialogService);
   private readonly theme = inject(ThemeService);
   /** Ray tracing, when the workbench provides it. */
   private readonly raytrace = inject(RaytraceService, { optional: true });
@@ -144,7 +148,14 @@ export class ViewportPanel {
   /** Walk mode: WASD moves the camera, dragging looks around. */
   protected readonly walking = this.panel.state('walk', false);
   /** Walking speed, as a multiple of the speed for the scene's size. */
-  private readonly walkSpeed = this.panel.state('walkSpeed', 1);
+  private readonly walkSpeedState = this.panel.state('walkSpeed', 1);
+  private readonly walkSpeed = computed(() => clampWalk(this.walkSpeedState(), WALK_SPEED, 1));
+  /** Shift multiplies the keys' walking speed by this. */
+  private readonly fastKeysState = this.panel.state('walkFastKeys', defaultWalkSettings().fastKeys);
+  private readonly fastKeys = computed(() => clampWalk(this.fastKeysState(), WALK_FAST, defaultWalkSettings().fastKeys));
+  /** Shift multiplies the mouse's walking speed (middle-drag and wheel) by this. */
+  private readonly fastMouseState = this.panel.state('walkFastMouse', defaultWalkSettings().fastMouse);
+  private readonly fastMouse = computed(() => clampWalk(this.fastMouseState(), WALK_FAST, defaultWalkSettings().fastMouse));
   protected readonly walkSpeedLabel = computed(() => {
     this.doc.revision();
     const v = this.baseWalkSpeed() * this.walkSpeed();
@@ -684,6 +695,21 @@ export class ViewportPanel {
   private walkFrame = 0;
   private walkLast = 0;
 
+  /** Opens the walk settings for this view. */
+  protected async openWalkSettings(): Promise<void> {
+    const s = await this.dialogs.walkOptions(
+      { speed: this.walkSpeed(), fastKeys: this.fastKeys(), fastMouse: this.fastMouse() },
+      this.baseWalkSpeed(),
+    );
+    if (!s) return;
+    this.panel.setState({
+      walkSpeed: Math.round(clampWalk(s.speed, WALK_SPEED, 1) * 1000) / 1000,
+      walkFastKeys: clampWalk(s.fastKeys, WALK_FAST, defaultWalkSettings().fastKeys),
+      walkFastMouse: clampWalk(s.fastMouse, WALK_FAST, defaultWalkSettings().fastMouse),
+    });
+    this.containerRef().nativeElement.focus({ preventScroll: true });
+  }
+
   /** Turns walk mode on or off. Orbiting is off while walking. */
   protected setWalking(on: boolean): void {
     if (on && this.zoomBox()) this.setZoomBox(false);
@@ -767,7 +793,7 @@ export class ViewportPanel {
     if (k.has('KeyE') || k.has('PageUp')) move.y += 1;
     if (k.has('KeyQ') || k.has('PageDown')) move.y -= 1;
     if (move.lengthSq() === 0) return;
-    const run = k.has('ShiftLeft') || k.has('ShiftRight') ? 3 : 1;
+    const run = k.has('ShiftLeft') || k.has('ShiftRight') ? this.fastKeys() : 1;
     move.normalize().multiplyScalar(this.baseWalkSpeed() * this.walkSpeed() * run * dt);
     this.walkBy(move);
   }
@@ -789,7 +815,7 @@ export class ViewportPanel {
       lastY = ev.clientY;
       if (!dx && !dy) return;
       moved = true;
-      const step = (this.baseWalkSpeed() * this.walkSpeed() * (ev.shiftKey ? 3 : 1)) / 400;
+      const step = (this.baseWalkSpeed() * this.walkSpeed() * (ev.shiftKey ? this.fastMouse() : 1)) / 400;
       const { right } = this.walkAxes();
       // The scene follows the mouse: dragging right walks left, dragging up walks down.
       this.walkBy(right.multiplyScalar(-dx * step).add(new THREE.Vector3(0, dy * step, 0)));
@@ -845,21 +871,23 @@ export class ViewportPanel {
 
   /**
    * In walk mode, the wheel walks forward and back, a quarter of a second of walking a notch
-   * (Shift runs). Ctrl+wheel changes the walking speed.
+   * (Shift runs at the mouse's fast speed). Ctrl+wheel changes the walking speed.
    */
   private readonly onWheel = (e: WheelEvent) => {
     if (!this.walking()) return;
     e.preventDefault();
-    if (!e.deltaY) return;
+    // With Shift, browsers on Windows and Linux turn the wheel sideways, into deltaX.
+    const delta = e.deltaY || (e.shiftKey ? e.deltaX : 0);
+    if (!delta) return;
     if (e.ctrlKey || e.metaKey) {
-      const speed = Math.min(Math.max(this.walkSpeed() * (e.deltaY < 0 ? 1.25 : 0.8), 0.05), 50);
+      const speed = clampWalk(this.walkSpeed() * (delta < 0 ? 1.25 : 0.8), WALK_SPEED, 1);
       this.panel.setState({ walkSpeed: Math.round(speed * 1000) / 1000 });
       return;
     }
     // Notches, from pixels, lines or pages; a touchpad's small steps move a little.
     const unit = e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 10 : e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 / 3 : 1 / 100;
-    const notches = Math.max(-5, Math.min(5, -e.deltaY * unit));
-    const distance = this.baseWalkSpeed() * this.walkSpeed() * (e.shiftKey ? 3 : 1) * 0.25 * notches;
+    const notches = Math.max(-5, Math.min(5, -delta * unit));
+    const distance = this.baseWalkSpeed() * this.walkSpeed() * (e.shiftKey ? this.fastMouse() : 1) * 0.25 * notches;
     this.walkBy(this.walkAxes().forward.multiplyScalar(distance));
     clearTimeout(this.wheelSave);
     this.wheelSave = setTimeout(() => this.saveCamera(), 300);
