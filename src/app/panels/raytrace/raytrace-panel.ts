@@ -1,6 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import * as THREE from 'three';
 import { MAX_WORKERS, RaytraceMode, RaytraceService, RaytraceSettings, SAME_AS_VIEW, describeProgress } from '../../raytrace/raytrace.service';
+import { ENVIRONMENTS, ENVIRONMENT_FILES, EnvironmentKind } from '../../raytrace/environments';
 import { downloadBlob } from '../../ui/files';
 import { SelectValue } from '../../ui/select-value';
 
@@ -105,6 +106,42 @@ import { SelectValue } from '../../ui/select-value';
         </label>
       </fieldset>
 
+      <fieldset class="environment-settings">
+        <legend>Environment</legend>
+        <label class="field" [title]="environmentAbout()">
+          <span>Around</span>
+          <select class="input" [appSelectValue]="s().environment" (change)="setEnvironment($event, envFile)">
+            @for (e of environments; track e.kind) {
+              <option [value]="e.kind" [title]="e.about">{{ e.kind === 'file' && rt.environmentFile() ? rt.environmentFile()!.name : e.label }}</option>
+            }
+          </select>
+        </label>
+        <input #envFile type="file" hidden [accept]="environmentFiles" (change)="loadEnvironment($event)" />
+        @if (rt.environmentPreview(); as src) {
+          <img class="environment-preview" [src]="src" alt="The environment, all round, as one picture" />
+        }
+        @if (s().environment !== 'none') {
+          <label class="field" title="How bright the environment is, in reflections and as light">
+            <span>Intensity</span>
+            <span class="range"><input type="range" min="0" max="3" step="0.05" [value]="s().environmentIntensity" (input)="set({ environmentIntensity: +value($event) })" /><output>{{ s().environmentIntensity }}</output></span>
+          </label>
+          <label class="field" title="Turns the environment round the vertical axis, to move its lights and sun">
+            <span>Rotation °</span>
+            <span class="range"><input type="range" min="-180" max="180" step="5" [value]="s().environmentRotation" (input)="set({ environmentRotation: +value($event) })" /><output>{{ s().environmentRotation }}</output></span>
+          </label>
+          <label class="field">
+            <span>Background</span>
+            <span class="check"><input type="checkbox" [checked]="s().environmentBackground" (change)="set({ environmentBackground: checked($event) })" /> Show behind the scene</span>
+          </label>
+          <button type="button" class="btn" (click)="envFile.click()">Load .hdr, .exr or image…</button>
+        }
+        @if (envError()) {
+          <p class="hint">{{ envError() }}</p>
+        } @else if (s().environment === 'file' && !rt.environmentFile()) {
+          <p class="hint">Choose a file to use.</p>
+        }
+      </fieldset>
+
       <fieldset>
         <legend>Image</legend>
         <label class="field">
@@ -160,6 +197,10 @@ export class RaytracePanel {
   protected readonly s = this.rt.settings;
   protected readonly maxWorkers = MAX_WORKERS;
   protected readonly saveError = signal('');
+  protected readonly envError = signal('');
+  protected readonly environments = ENVIRONMENTS;
+  protected readonly environmentFiles = ENVIRONMENT_FILES;
+  protected readonly environmentAbout = computed(() => ENVIRONMENTS.find(e => e.kind === this.s().environment)?.about ?? '');
 
   protected readonly modeOptions: { value: RaytraceMode; name: string }[] = [
     { value: 'off', name: 'Off (WebGL only)' },
@@ -213,6 +254,28 @@ export class RaytracePanel {
 
   protected set(patch: Partial<RaytraceSettings>): void {
     this.rt.updateSettings(patch);
+  }
+
+  /** Chooses an environment; From a file asks for one when none is loaded. */
+  protected setEnvironment(event: Event, input: HTMLInputElement): void {
+    const select = event.target as HTMLSelectElement;
+    const kind = select.value;
+    this.envError.set('');
+    if (kind === 'file' && !this.rt.environmentFile()) {
+      // Until one is loaded, the choice stays as it was.
+      select.value = this.s().environment;
+      input.click();
+      return;
+    }
+    this.set({ environment: kind as EnvironmentKind });
+  }
+
+  protected async loadEnvironment(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    this.envError.set((await this.rt.loadEnvironment(file)) ?? '');
   }
 
   protected setToneMapping(v: string): void {

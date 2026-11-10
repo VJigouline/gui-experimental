@@ -1727,3 +1727,21 @@ body.resizing-row canvas {
     text-decoration: underline;
   }
 }
+
+/* The ray tracer's environment, all round, as one picture. */
+.environment-settings {
+  .environment-preview {
+    display: block;
+    width: 100%;
+    max-width: 320px;
+    aspect-ratio: 2;
+    margin: 2px 0 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    object-fit: cover;
+  }
+
+  > .btn {
+    margin-top: 4px;
+  }
+}

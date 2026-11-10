@@ -3,6 +3,7 @@ import { RaytracingRenderer, type RaytracingProgress } from 'meercad-raytracer';
 import * as THREE from 'three';
 import { SceneDocument } from '../scene/scene-document';
 import { DialogService } from '../ui/dialog/dialog.service';
+import { ENVIRONMENTS, EnvironmentKind, builtInEnvironment, environmentThumbnail, loadEnvironmentFile } from './environments';
 
 /** Where the ray traced image is shown. */
 export type RaytraceMode = 'off' | 'view' | 'window';
@@ -34,6 +35,13 @@ export interface RaytraceSettings {
   backgroundColour: string;
   /** In the separate window, keep the view's proportions instead of stretching to the window. */
   keepProportions: boolean;
+  /** What is around the scene, for reflections, refractions and light. */
+  environment: EnvironmentKind;
+  environmentIntensity: number;
+  /** Turns the environment round the vertical axis, in degrees. */
+  environmentRotation: number;
+  /** Show the environment behind the scene, instead of the background colour. */
+  environmentBackground: boolean;
 }
 
 export const MAX_WORKERS = Math.max(1, typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4);
@@ -53,6 +61,11 @@ export function defaultRaytraceSettings(): RaytraceSettings {
     background: 'view',
     backgroundColour: '#ffffff',
     keepProportions: true,
+    // As the 3D views' reflections: a studio, at half strength.
+    environment: 'studio',
+    environmentIntensity: 0.5,
+    environmentRotation: 0,
+    environmentBackground: false,
   };
 }
 
@@ -95,6 +108,13 @@ export class RaytraceService {
   readonly target = signal<string | null>(null);
   readonly settings = signal<RaytraceSettings>(readSettings());
   readonly progress = signal<RaytracingProgress>(IDLE);
+  /** The environment loaded from a file, if any; kept for this visit only. */
+  readonly environmentFile = signal<{ name: string; texture: THREE.Texture } | null>(null);
+  /** A picture of the environment in use, or null for none. */
+  readonly environmentPreview = computed(() => {
+    const t = this.environmentTexture();
+    return t ? environmentThumbnail(t) : null;
+  });
 
   private readonly viewsStore = signal<ReadonlyMap<string, RaytraceView>>(new Map());
   /** The 3D views open, in the order they opened. */
@@ -269,7 +289,49 @@ export class RaytraceService {
     renderer.toneMappingExposure = s.exposure;
     renderer.outputColorSpace = (s.colorSpace === SAME_AS_VIEW ? webgl.outputColorSpace : s.colorSpace) as THREE.ColorSpace;
     renderer.setClearColor(new THREE.Color(s.background === 'colour' ? s.backgroundColour : view.background()), 1);
-    renderer.render(this.doc.scene, view.camera);
+    renderer.render(this.tracedScene(), view.camera);
+  }
+
+  /** The environment chosen, or null for none, or for a file that isn't loaded. */
+  readonly environmentTexture = computed<THREE.Texture | null>(() => {
+    const kind = this.settings().environment;
+    return kind === 'file' ? (this.environmentFile()?.texture ?? null) : builtInEnvironment(kind);
+  });
+
+  /**
+   * The scene as traced: the document's scene with the environment around it. Not the scene itself,
+   * which the 3D views draw with their own environment: a view of it whose environment and
+   * background are its own, as the tracer reads them when it starts, a frame later.
+   */
+  private tracedScene(): THREE.Scene {
+    const env = this.environmentTexture();
+    if (!env) return this.doc.scene;
+    const s = this.settings();
+    const rotation = new THREE.Euler(0, THREE.MathUtils.degToRad(s.environmentRotation), 0);
+    const traced = Object.create(this.doc.scene) as THREE.Scene;
+    traced.environment = env;
+    traced.environmentIntensity = s.environmentIntensity;
+    traced.environmentRotation = rotation;
+    if (s.environmentBackground) {
+      traced.background = env;
+      traced.backgroundIntensity = s.environmentIntensity;
+      traced.backgroundRotation = rotation;
+    }
+    return traced;
+  }
+
+  /** Loads an environment from a file and uses it. Returns an error message, or null. */
+  async loadEnvironment(file: File): Promise<string | null> {
+    try {
+      const texture = await loadEnvironmentFile(file);
+      this.environmentFile()?.texture.dispose();
+      this.environmentFile.set({ name: file.name, texture });
+      this.updateSettings({ environment: 'file' });
+      return null;
+    } catch (e) {
+      console.warn(`Couldn't read ${file.name} as an environment.`, e);
+      return `Couldn't read ${file.name}: ${e instanceof Error ? e.message : e}`;
+    }
   }
 
   /** Called by a view when it changes size. */
@@ -445,6 +507,9 @@ function readSettings(): RaytraceSettings {
       }
     }
     merged.workers = Math.min(Math.max(1, merged.workers), MAX_WORKERS);
+    if (!ENVIRONMENTS.some(e => e.kind === merged.environment)) merged.environment = defaults.environment;
+    // A file isn't kept between visits.
+    if (merged.environment === 'file') merged.environment = defaults.environment;
     return merged;
   } catch {
     return defaults;
