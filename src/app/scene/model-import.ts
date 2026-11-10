@@ -9,6 +9,9 @@ export const MODEL_EXTENSIONS = ['.glb', '.gltf', '.stl', '.obj', '.ifc', '.stp'
 /** STEP files, including gzip-compressed `.stpz`. */
 export const STEP_EXTENSIONS = ['.stp', '.step', '.p21', '.stpz'];
 
+/** STEP files this large or larger are tessellated in web workers. */
+export const STEP_WORKERS_FROM_BYTES = 2_000_000;
+
 export interface ImportedModel {
   object: THREE.Object3D;
   /** Things the reader left out or guessed, for the console. */
@@ -96,6 +99,12 @@ export async function importModel(file: File, ifc?: IfcImportSettings, step?: St
         maxTrianglesPerFace: step?.maxTrianglesPerFace,
         includeHidden: step?.includeHidden,
         preferTessellated: step?.preferTessellated,
+        // Large files are tessellated in workers, several at once, and the page stays responsive.
+        // Small ones are quicker here than the workers take to start.
+        workers:
+          file.size >= STEP_WORKERS_FROM_BYTES && typeof Worker !== 'undefined'
+            ? { create: () => new Worker(new URL('./step.worker', import.meta.url), { type: 'module' }) }
+            : undefined,
       });
       object = result.group;
       // The faces' boundary loops, which views show on their own layer.
