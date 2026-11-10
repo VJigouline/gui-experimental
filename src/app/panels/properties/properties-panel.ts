@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
+import { DimensionName, dimensionsOf, editableShape, withDimension } from '../../scene/primitive-edit';
 
 type Vec = [number, number, number];
 
@@ -19,6 +20,8 @@ interface Props {
   material: { color: string; roughness: number | null; metalness: number | null; opacity: number; wireframe: boolean } | null;
   light: { color: string; intensity: number } | null;
   geometry: { vertices: number; triangles: number } | null;
+  /** A primitive's sizes, before its scale. */
+  dimensions: { name: DimensionName; label: string; value: number }[] | null;
   children: number;
   ifc: IfcInfo | null;
   step: { label: string; value: string }[] | null;
@@ -79,6 +82,18 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
             </div>
           }
         </fieldset>
+
+        @if (p.dimensions; as dims) {
+          <fieldset>
+            <legend title="The shape's own sizes, before its scale. Drag a face, edge or corner in a 3D view to change them there.">Dimensions</legend>
+            @for (d of dims; track d.name) {
+              <label class="field">
+                <span>{{ d.label }}</span>
+                <input class="input num" type="number" min="0" step="0.1" [value]="d.value" (change)="setDimension(p, d.name, $event)" />
+              </label>
+            }
+          </fieldset>
+        }
 
         @if (p.ifc; as ifc) {
           <fieldset class="ifc-props">
@@ -216,6 +231,10 @@ export class PropertiesPanel {
             triangles: Math.round((geo.index ? geo.index.count : geo.attributes['position'].count) / 3),
           }
         : null,
+      dimensions: (() => {
+        const shape = editableShape(o);
+        return shape ? dimensionsOf(shape).map(d => ({ ...d, value: round(d.value) })) : null;
+      })(),
       children: o.children.filter(isDocumentObject).length,
       ifc: ifcInfo(o.userData['ifc']),
       step: stepInfo(o.userData['step']),
@@ -228,6 +247,18 @@ export class PropertiesPanel {
     const vec = [...p[key]] as Vec;
     vec[axis] = v;
     this.doc.setTransform(p.id, { [key]: vec });
+  }
+
+  /** Sets a size of a primitive, keeping its centre; a size it can't take is put back. */
+  protected setDimension(p: Props, name: DimensionName, event: Event): void {
+    const o = this.doc.get(p.id);
+    const shape = o && editableShape(o);
+    const params = shape && withDimension(shape, name, this.num(event));
+    if (params) this.doc.setShape(p.id, params);
+    else {
+      const d = p.dimensions?.find(x => x.name === name);
+      if (d) (event.target as HTMLInputElement).value = String(d.value);
+    }
   }
 
   protected value(event: Event): string {

@@ -1,5 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import * as THREE from 'three';
+import { buildGeometry, editableShape } from './primitive-edit';
 
 /** The kinds of object the editing tools can add. */
 export type PrimitiveKind = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'knot' | 'plane' | 'group' | 'point-light';
@@ -254,6 +255,21 @@ export class SceneDocument {
     if (patch.position) o.position.fromArray(patch.position);
     if (patch.rotation) o.rotation.set(...(patch.rotation.map(THREE.MathUtils.degToRad) as [number, number, number]));
     if (patch.scale) o.scale.fromArray(patch.scale.map(v => (Math.abs(v) < 1e-6 ? 1e-6 : v)));
+    this.touch();
+  }
+
+  /**
+   * Changes a primitive's dimensions: replaces its geometry with one built from `params`, and
+   * optionally moves it to `position`, in its parent, so that a side held still stays put.
+   */
+  setShape(id: string, params: Record<string, number>, position?: THREE.Vector3): void {
+    const o = this.get(id) as THREE.Mesh | undefined;
+    const shape = o && editableShape(o);
+    if (!o || !shape) return;
+    const old = o.geometry;
+    o.geometry = buildGeometry(shape.kind, { ...shape.params, ...params });
+    old.dispose();
+    if (position) o.position.copy(position);
     this.touch();
   }
 

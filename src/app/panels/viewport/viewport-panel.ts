@@ -10,6 +10,9 @@ import { WALK_FAST, WALK_SPEED, clampWalk, defaultWalkSettings } from './walk-se
 import { FACE_LOOPS_LAYER, SceneDocument } from '../../scene/scene-document';
 import { ThemeService } from '../../ui/theme.service';
 import { RaytraceService, describeProgress } from '../../raytrace/raytrace.service';
+import {
+  Dimension, EditableShape, Handle, constrainedPoint, dimensionLines, editableShape, formatLength, pickHandle,
+} from '../../scene/primitive-edit';
 
 interface CameraState {
   position: [number, number, number];
@@ -55,6 +58,19 @@ export const BACKGROUNDS = [
       (blur)="stopWalking()"></div>
     @if (zoomRect(); as r) {
       <div class="zoom-rect" [style.left.px]="r.x" [style.top.px]="r.y" [style.width.px]="r.w" [style.height.px]="r.h"></div>
+    }
+    @if (dimDraw().length) {
+      <svg class="dimension-lines" aria-hidden="true" [style.color]="dimColour()" [style.--dim-halo]="dimHalo()">
+        @for (d of dimDraw(); track $index) {
+          @for (l of d.lines; track $index) {
+            <line [attr.x1]="l[0]" [attr.y1]="l[1]" [attr.x2]="l[2]" [attr.y2]="l[3]" />
+          }
+          @for (a of d.arrows; track $index) {
+            <polygon [attr.points]="a" />
+          }
+          <text [attr.x]="d.tx" [attr.y]="d.ty" [attr.transform]="d.rotate">{{ d.label }}</text>
+        }
+      </svg>
     }
     @if (error()) {
       <div class="panel-empty">{{ error() }}</div>
@@ -114,12 +130,14 @@ export const BACKGROUNDS = [
     <div class="viewport-info">
       @if (tracing()) {
         Ray traced · {{ traceStatus() }}
+      } @else if (editInfo(); as info) {
+        {{ info }} · Ctrl keeps the centre · Esc cancels
       } @else if (zoomBox()) {
         Zoom box · drag a rectangle to zoom to it, or click to zoom in · Esc cancels
       } @else if (walking()) {
         Walk · WASD move · Q/E down, up · drag to look · middle-drag sideways, up · wheel forward, back · Shift fast ({{ fastKeys() }}× keys, {{ fastMouse() }}× mouse) · Ctrl+wheel {{ walkSpeedLabel() }} · Esc leaves
       } @else {
-        {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected
+        {{ mode() === 'select' ? 'Select' : modeLabel() }} · {{ selectionCount() }} selected{{ canSize() ? ' · drag a face, edge or corner to size' : '' }}
       }
     </div>
   `,
@@ -169,6 +187,11 @@ export class ViewportPanel {
   protected readonly selectionCount = computed(() => {
     this.doc.revision();
     return this.doc.objects(this.selection()?.ids).length;
+  });
+  /** Whether a selected object is a shape that can be sized by dragging. */
+  protected readonly canSize = computed(() => {
+    this.doc.revision();
+    return this.doc.objects(this.selection()?.ids).some(o => !!editableShape(o));
   });
   protected readonly mode = computed<ToolMode>(() => this.tool()?.mode ?? 'select');
   protected readonly modeLabel = computed(() => ({ select: 'Select', translate: 'Move', rotate: 'Rotate', scale: 'Scale' })[this.mode()]);
@@ -269,6 +292,10 @@ export class ViewportPanel {
     this.gizmo.addEventListener('objectChange', () => this.doc.touch());
 
     const canvas = this.renderer.domElement;
+    // Before the orbit and gizmo controls see it: a press on a selected shape's face, edge or corner sizes it.
+    container.addEventListener('pointerdown', this.onEditPointerDown, { capture: true });
+    canvas.addEventListener('pointermove', this.onHover);
+    canvas.addEventListener('pointerleave', this.onHoverLeave);
     canvas.addEventListener('pointerdown', this.onPointerDown);
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('dblclick', this.onDoubleClick);
@@ -308,6 +335,8 @@ export class ViewportPanel {
   });
 
   private dispose(): void {
+    this.edit?.cancel();
+    this.containerRef().nativeElement.removeEventListener('pointerdown', this.onEditPointerDown, { capture: true });
     this.stopWalking();
     clearTimeout(this.wheelSave);
     this.raytrace?.unregister(this.panel.id);
@@ -358,6 +387,7 @@ export class ViewportPanel {
       scene.overrideMaterial = null;
       r.render(this.overlay, this.camera);
     }
+    this.drawDimensions();
     // Ray traces again from the camera as it is now, when this view is traced.
     this.raytrace?.render(this.panel.id);
   }
@@ -535,6 +565,11 @@ export class ViewportPanel {
     this.pointerDown = null;
     if (!down || e.button !== 0 || down.onGizmo) return;
     if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
+    this.selectAt(e);
+  };
+
+  /** A click selects what is under it; with Shift or Ctrl, adds it or takes it away. */
+  private selectAt(e: MouseEvent): void {
     const id = this.pick(e);
     const current = this.selection()?.ids ?? [];
     let ids: string[];
@@ -546,7 +581,7 @@ export class ViewportPanel {
     if (ids.length !== current.length || ids.some((x, i) => x !== current[i])) {
       this.panel.publish('selection', { ids }, true);
     }
-  };
+  }
 
   private readonly onDoubleClick = (e: MouseEvent) => {
     const id = this.pick(e);
@@ -554,17 +589,32 @@ export class ViewportPanel {
   };
 
   private pick(e: MouseEvent): string | null {
+    return this.firstHit(this.rayAt(e))?.object.uuid ?? null;
+  }
+
+  /** A ray from the camera through the pointer. */
+  private rayAt(e: MouseEvent): THREE.Raycaster {
     const canvas = this.renderer!.domElement;
     const r = canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, this.camera);
-    const hits = ray.intersectObjects(this.doc.scene.children, true);
-    const hit = hits.find(h => isShown(h.object) && !(h.object as THREE.Light).isLight);
-    return hit?.object.uuid ?? null;
+    return ray;
+  }
+
+  /** The first visible thing a ray hits, not counting lights. */
+  private firstHit(ray: THREE.Raycaster): THREE.Intersection | undefined {
+    return ray.intersectObjects(this.doc.scene.children, true).find(h => isShown(h.object) && !(h.object as THREE.Light).isLight);
   }
 
   protected onKey(e: KeyboardEvent): void {
+    if (this.edit) {
+      // While sizing a shape: Esc puts it back, Ctrl switches to keeping the centre.
+      if (e.key === 'Escape') this.edit.cancel();
+      else if (e.key === 'Control' || e.key === 'Meta') this.edit.update(true);
+      e.preventDefault();
+      return;
+    }
     const modes: Record<string, ToolMode> = { q: 'select', w: 'translate', e: 'rotate', r: 'scale' };
     const key = e.key.toLowerCase();
     const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -600,6 +650,298 @@ export class ViewportPanel {
       return;
     }
     e.preventDefault();
+  }
+
+  // ------------------------------------------------------------ sizing shapes
+
+  /** The shape being sized, while the button is down. */
+  private edit: EditState | null = null;
+  /** The dimension lines drawn over the view while a shape is sized, in pixels. */
+  protected readonly dimDraw = signal<DimensionDraw[]>([]);
+  protected readonly dimColour = signal('#ffd400');
+  protected readonly dimHalo = signal('#1b2230');
+  /** The dimensions being changed, for the status line. */
+  protected readonly editInfo = signal<string | null>(null);
+
+  /**
+   * The selected box, sphere, cylinder, cone, torus or plane under the pointer, and the face, edge
+   * or corner of it there, if nothing else is in front.
+   */
+  private editTarget(e: MouseEvent): { mesh: THREE.Mesh; shape: EditableShape; handle: Handle } | null {
+    if (!this.renderer || this.walking() || this.zoomBox()) return null;
+    const selected = this.doc.objects(this.selection()?.ids).filter(o => isShown(o) && !!editableShape(o));
+    if (!selected.length) return null;
+    const ray = this.rayAt(e);
+    const hit = ray.intersectObjects(selected, false)[0];
+    if (!hit?.face) return null;
+    const first = this.firstHit(ray);
+    if (first && first.object !== hit.object && first.distance < hit.distance) return null;
+    const mesh = hit.object as THREE.Mesh;
+    const shape = editableShape(mesh)!;
+    const local = mesh.worldToLocal(hit.point.clone());
+    const handle = pickHandle(shape, local, hit.face.normal, this.localTolerance(mesh, hit.point, 8));
+    return handle ? { mesh, shape, handle } : null;
+  }
+
+  /** How far `pixels` is at a point, along each of an object's local axes. */
+  private localTolerance(o: THREE.Object3D, at: THREE.Vector3, pixels: number): THREE.Vector3 {
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    const depth = Math.max(at.clone().sub(this.camera.position).dot(forward), this.camera.near);
+    const height = this.renderer?.domElement.clientHeight || 1;
+    const world = (pixels * 2 * depth * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / height;
+    const scale = worldScale(o);
+    return new THREE.Vector3(world / scale.x, world / scale.y, world / scale.z);
+  }
+
+  /** Presses on a selected shape size it, before orbiting or the gizmo can take the press. */
+  private readonly onEditPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0 || e.target !== this.renderer?.domElement || this.edit) return;
+    if (this.gizmo?.object && this.gizmo.axis !== null) return;
+    const target = this.editTarget(e);
+    if (!target) return;
+    e.stopPropagation();
+    this.containerRef().nativeElement.focus({ preventScroll: true });
+    this.startEdit(e, target.mesh, target.shape, target.handle);
+  };
+
+  /** Shows what a press would hold, with the cursor. */
+  private readonly onHover = (e: PointerEvent) => {
+    const canvas = this.renderer?.domElement;
+    if (!canvas || this.edit || e.buttons) return;
+    let cursor = '';
+    if (!(this.gizmo?.object && this.gizmo.axis !== null)) {
+      const t = this.editTarget(e);
+      if (t) cursor = this.cursorFor(t.mesh, t.handle);
+    }
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+  };
+
+  private readonly onHoverLeave = () => {
+    if (this.renderer && !this.edit) this.renderer.domElement.style.cursor = '';
+  };
+
+  /**
+   * A resize cursor along the line a face moves on, or out from the centre or axis for a round
+   * size; a move cursor for edges and corners.
+   */
+  private cursorFor(mesh: THREE.Mesh, handle: Handle): string {
+    const c = handle.constraint;
+    let a: { x: number; y: number };
+    let b: { x: number; y: number };
+    if (c.kind === 'line') {
+      a = this.toScreen(handle.grab, mesh);
+      b = this.toScreen(handle.grab.clone().add(c.dir.clone().multiplyScalar(0.01 * (handle.grab.length() || 1))), mesh);
+    } else if (c.kind === 'radial' && handle.dims.length === 1) {
+      const foot = c.axis ? c.axis.clone().multiplyScalar(handle.grab.dot(c.axis)) : new THREE.Vector3();
+      a = this.toScreen(foot, mesh);
+      b = this.toScreen(handle.grab, mesh);
+    } else {
+      return 'move';
+    }
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-3) return 'move';
+    const angle = ((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 180) % 180;
+    if (angle < 22.5 || angle >= 157.5) return 'ew-resize';
+    if (angle < 67.5) return 'nwse-resize';
+    if (angle < 112.5) return 'ns-resize';
+    return 'nesw-resize';
+  }
+
+  /** A point in an object's local coordinates, in pixels in the view; `behind` if behind the camera. */
+  private toScreen(local: THREE.Vector3, o: THREE.Object3D): { x: number; y: number; behind: boolean } {
+    const canvas = this.renderer!.domElement;
+    const p = local.clone().applyMatrix4(o.matrixWorld).project(this.camera);
+    return { x: ((p.x + 1) / 2) * canvas.clientWidth, y: ((1 - p.y) / 2) * canvas.clientHeight, behind: p.z > 1 };
+  }
+
+  /**
+   * Sizes a shape as the pointer moves: the point held follows the pointer, along its line or over
+   * its plane. A press without a drag is a click, and selects as usual.
+   */
+  private startEdit(e: PointerEvent, mesh: THREE.Mesh, shape: EditableShape, handle: Handle): void {
+    const canvas = this.renderer!.domElement;
+    canvas.setPointerCapture?.(e.pointerId);
+    mesh.updateMatrixWorld();
+    const inverse = mesh.matrixWorld.clone().invert();
+    const startPosition = mesh.position.clone();
+    const scale = worldScale(mesh);
+    const snap = this.tool()?.snap ?? null;
+    const view = this.camera.getWorldDirection(new THREE.Vector3()).transformDirection(inverse);
+    const rect = canvas.getBoundingClientRect();
+    let moved = false;
+    let last: PointerEvent = e;
+    let symmetric = e.ctrlKey || e.metaKey;
+    // Sizes change by how far the pointer moves from where it was pressed, under the same constraint.
+    const from = constrainedPoint(handle, this.rayAt(e).ray.clone().applyMatrix4(inverse), view) ?? handle.grab;
+
+    const apply = () => {
+      const ray = this.rayAt(last).ray.clone().applyMatrix4(inverse);
+      const p = constrainedPoint(handle, ray, view);
+      if (!p) return;
+      const r = handle.apply(p, { symmetric, snap, scale, from });
+      const position = startPosition.clone().add(r.shift.multiply(mesh.scale).applyQuaternion(mesh.quaternion));
+      this.doc.setShape(mesh.uuid, r.params, position);
+    };
+    const move = (ev: PointerEvent) => {
+      last = ev;
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) <= 3) return;
+      moved = true;
+      symmetric = ev.ctrlKey || ev.metaKey;
+      apply();
+    };
+    const finish = () => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', cancel);
+      if (canvas.hasPointerCapture?.(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      this.edit = null;
+      this.editInfo.set(null);
+      this.requestRender();
+    };
+    const up = (ev: PointerEvent) => {
+      finish();
+      if (!moved) this.selectAt(ev);
+    };
+    const cancel = () => {
+      finish();
+      if (moved) this.doc.setShape(mesh.uuid, shape.params, startPosition);
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', cancel);
+
+    this.edit = {
+      mesh,
+      handle,
+      grab: { x: e.clientX - rect.left, y: e.clientY - rect.top },
+      chosen: [],
+      cancel,
+      update: ctrl => {
+        symmetric = ctrl;
+        if (moved) apply();
+      },
+    };
+    this.requestRender();
+  }
+
+  /**
+   * Engineering dimension lines for what is being changed: extension lines from the shape, a line
+   * with arrows between them, and the size, in scene units, over its middle. Each dimension goes
+   * where it is furthest out from the shape on screen, chosen when the drag begins.
+   */
+  private drawDimensions(): void {
+    const ed = this.edit;
+    const shape = ed && editableShape(ed.mesh);
+    if (!ed || !shape || !this.renderer) {
+      if (this.dimDraw().length) this.dimDraw.set([]);
+      return;
+    }
+    const mesh = ed.mesh;
+    mesh.updateMatrixWorld();
+    const inverse = mesh.matrixWorld.clone().invert();
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).transformDirection(inverse);
+    const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).transformDirection(inverse);
+    const centre = this.toScreen(new THREE.Vector3(), mesh);
+    const draws: DimensionDraw[] = [];
+    dimensionLines(shape, ed.handle.dims, right, up).forEach((candidates, i) => {
+      const laid = candidates.map(c => this.layOut(c, mesh, centre, ed.grab));
+      let pick = ed.chosen[i];
+      if (pick === undefined || !laid[pick]) {
+        pick = -1;
+        laid.forEach((d, j) => {
+          if (d && (pick < 0 || d.score > laid[pick]!.score)) pick = j;
+        });
+        if (pick < 0) return;
+        ed.chosen[i] = pick;
+      }
+      draws.push(laid[pick]!);
+    });
+    this.dimDraw.set(draws);
+    const bg = this.backgroundColour();
+    this.dimColour.set(isLight(bg) ? '#0b57d0' : '#ffd400');
+    this.dimHalo.set(bg);
+    this.editInfo.set(draws.length ? `${mesh.name}: ${draws.map(d => `${DIMENSION_NAMES[d.name]} ${d.label}`).join(', ')}` : `Sizing ${mesh.name}`);
+  }
+
+  /** A dimension in pixels: its lines, arrowheads and label, or null if seen end on. */
+  private layOut(d: Dimension, mesh: THREE.Mesh, centre: { x: number; y: number }, grab: { x: number; y: number }): DimensionDraw | null {
+    const hasSide = d.side.lengthSq() > 0;
+    // The measured points, brought out level with each other on the side the line goes.
+    const a2 = d.a.clone();
+    const b2 = d.b.clone();
+    if (hasSide) {
+      const level = Math.max(d.a.dot(d.side), d.b.dot(d.side));
+      a2.addScaledVector(d.side, level - d.a.dot(d.side));
+      b2.addScaledVector(d.side, level - d.b.dot(d.side));
+    }
+    const A = this.toScreen(d.a, mesh);
+    const B = this.toScreen(d.b, mesh);
+    const A2 = this.toScreen(a2, mesh);
+    const B2 = this.toScreen(b2, mesh);
+    if (A.behind || B.behind || A2.behind || B2.behind) return null;
+    const len = Math.hypot(B2.x - A2.x, B2.y - A2.y);
+    if (len < 4) return null;
+    const t = { x: (B2.x - A2.x) / len, y: (B2.y - A2.y) / len };
+    // Which way the line is set off on screen: the side, square to the line.
+    let n = { x: -t.y, y: t.x };
+    if (hasSide) {
+      const P = this.toScreen(a2.clone().addScaledVector(d.side, 0.05 * (d.a.distanceTo(d.b) || 1)), mesh);
+      const sx = P.x - A2.x;
+      const sy = P.y - A2.y;
+      const dot = sx * n.x + sy * n.y;
+      if (Math.abs(dot) > 1e-6) n = dot > 0 ? n : { x: -n.x, y: -n.y };
+      else if ((A2.x - centre.x) * n.x + (A2.y - centre.y) * n.y < 0) n = { x: -n.x, y: -n.y };
+    } else if (n.y > 0) {
+      n = { x: -n.x, y: -n.y };
+    }
+    const off = hasSide ? 26 : 0;
+    const L1 = { x: A2.x + n.x * off, y: A2.y + n.y * off };
+    const L2 = { x: B2.x + n.x * off, y: B2.y + n.y * off };
+    const lines: number[][] = [];
+    const arrows: string[] = [];
+    if (hasSide) {
+      // Extension lines from the shape, with a small gap, to a little past the dimension line.
+      for (const [from, to] of [[A, L1], [B, L2]] as const) {
+        const ex = to.x - from.x;
+        const ey = to.y - from.y;
+        const el = Math.hypot(ex, ey);
+        if (el < 4) continue;
+        lines.push([from.x + (ex / el) * 3, from.y + (ey / el) * 3, to.x + (ex / el) * 5, to.y + (ey / el) * 5]);
+      }
+    }
+    const head = 9;
+    const arrow = (tip: { x: number; y: number }, dx: number, dy: number) =>
+      `${tip.x},${tip.y} ${tip.x + dx * head - dy * 3.5},${tip.y + dy * head + dx * 3.5} ${tip.x + dx * head + dy * 3.5},${tip.y + dy * head - dx * 3.5}`;
+    if (len >= 2 * head + 8) {
+      lines.push([L1.x, L1.y, L2.x, L2.y]);
+      arrows.push(arrow(L1, t.x, t.y), arrow(L2, -t.x, -t.y));
+    } else {
+      // Too short for arrows inside: they point in from outside.
+      const out = head + 10;
+      lines.push([L1.x - t.x * out, L1.y - t.y * out, L2.x + t.x * out, L2.y + t.y * out]);
+      arrows.push(arrow(L1, -t.x, -t.y), arrow(L2, t.x, t.y));
+    }
+    // The size in the scene: along the axis, in world units.
+    const along = Math.abs(d.b.clone().sub(d.a).dot(d.axis));
+    const wa = d.a.clone().applyMatrix4(mesh.matrixWorld);
+    const wb = d.a.clone().addScaledVector(d.axis, along).applyMatrix4(mesh.matrixWorld);
+    const value = wa.distanceTo(wb);
+    let angle = (Math.atan2(t.y, t.x) * 180) / Math.PI;
+    if (angle > 90) angle -= 180;
+    if (angle <= -90) angle += 180;
+    // The label sits on the far side of the line from the shape, upright.
+    const tx = (L1.x + L2.x) / 2 + n.x * 10;
+    const ty = (L1.y + L2.y) / 2 + n.y * 10;
+    const outward = (tx - centre.x) * n.x + (ty - centre.y) * n.y;
+    return {
+      name: d.name,
+      lines: lines.map(l => l.map(v => Math.round(v * 10) / 10)),
+      arrows,
+      label: `${d.prefix}${formatLength(value)}`,
+      tx: Math.round(tx * 10) / 10,
+      ty: Math.round(ty * 10) / 10,
+      rotate: `rotate(${Math.round(angle * 10) / 10} ${Math.round(tx * 10) / 10} ${Math.round(ty * 10) / 10})`,
+      score: (hasSide ? outward : 0) - 0.25 * Math.hypot(tx - grab.x, ty - grab.y),
+    };
   }
 
   // ------------------------------------------------------------ zoom box
@@ -723,6 +1065,7 @@ export class ViewportPanel {
   }
 
   protected onKeyUp(e: KeyboardEvent): void {
+    if (this.edit && (e.key === 'Control' || e.key === 'Meta')) this.edit.update(false);
     if (this.walkKeys.delete(e.code) && this.walkKeys.size === 0) this.endWalkMove();
   }
 
@@ -901,6 +1244,61 @@ const WALK_KEYS = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown',
   'ShiftLeft', 'ShiftRight',
 ]);
+
+interface EditState {
+  mesh: THREE.Mesh;
+  handle: Handle;
+  /** Where the press was, in pixels in the view. */
+  grab: { x: number; y: number };
+  /** Which of each dimension's places was chosen, once drawn. */
+  chosen: number[];
+  /** Puts the shape back as it was and stops. */
+  cancel(): void;
+  /** Ctrl went down or up: keep the centre, or the opposite side. */
+  update(symmetric: boolean): void;
+}
+
+interface DimensionDraw {
+  name: Dimension['name'];
+  /** x1, y1, x2, y2 of each line. */
+  lines: number[][];
+  /** SVG polygon points of each arrowhead. */
+  arrows: string[];
+  label: string;
+  tx: number;
+  ty: number;
+  rotate: string;
+  /** How well placed: far out from the shape, and near the pointer. */
+  score: number;
+}
+
+const DIMENSION_NAMES: Record<Dimension['name'], string> = {
+  width: 'width',
+  height: 'height',
+  depth: 'depth',
+  diameter: 'diameter',
+  outer: 'outer diameter',
+  inner: 'inner diameter',
+  thickness: 'thickness',
+};
+
+/** An object's size in the world for each unit along its local axes. */
+function worldScale(o: THREE.Object3D): THREE.Vector3 {
+  o.updateMatrixWorld();
+  const c = new THREE.Vector3();
+  const s = [0, 1, 2].map(i => c.setFromMatrixColumn(o.matrixWorld, i).length() || 1);
+  return new THREE.Vector3(s[0], s[1], s[2]);
+}
+
+/** Whether a CSS colour is light, so dark lines show on it. */
+function isLight(colour: string): boolean {
+  try {
+    const c = new THREE.Color(colour);
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b > 0.5;
+  } catch {
+    return false;
+  }
+}
 
 /** Whether an object and all its parents are visible. */
 function isShown(o: THREE.Object3D): boolean {
