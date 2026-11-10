@@ -1,5 +1,6 @@
 import { PanelType } from '../core/panels/panel-type';
 import { LinksPanel } from './links/links-panel';
+import { MaterialsPanel } from './materials/materials-panel';
 import { MessagesPanel } from './messages/messages-panel';
 import { PropertiesPanel } from './properties/properties-panel';
 import { SceneTreePanel } from './scene-tree/scene-tree-panel';
@@ -39,6 +40,14 @@ export const APP_PANEL_TYPES: readonly PanelType[] = [
     icon: '✥',
     description: 'Transform tools, adding shapes and models, and commands on the selection',
     component: ToolsPanel,
+    multiple: true,
+  },
+  {
+    type: 'materials',
+    title: 'Materials',
+    icon: '🎨',
+    description: 'A library of common materials, with previews, to give to objects',
+    component: MaterialsPanel,
     multiple: true,
   },
   {

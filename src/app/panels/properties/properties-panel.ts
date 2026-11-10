@@ -5,6 +5,7 @@ import { channelInfo } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
 import { FieldValue, MATERIAL_GROUPS, MATERIAL_TYPES, MaterialField, SIDES, fieldsOf, materialType, readField } from '../../scene/materials';
+import { libraryEntry, libraryIdOf } from '../../scene/material-library';
 import { DimensionName, dimensionsOf, editableShape, withDimension } from '../../scene/primitive-edit';
 import { SOLID_OPERATIONS, SolidOperation, canBeOperand, isSolid, isSolidResult, solidOf, solidOperation, solidResult } from '../../scene/solids';
 
@@ -43,6 +44,8 @@ interface MaterialProps {
   convertible: boolean;
   /** Who else the material is shared with, if anyone. */
   shared: string;
+  /** The library material it was made from, by name. */
+  library: string;
   groups: { name: string; open: boolean; fields: { f: MaterialField; value: FieldValue }[] }[];
   note: string;
 }
@@ -218,6 +221,9 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
                 <span class="readonly">{{ m.type }}</span>
               }
             </label>
+            @if (m.library) {
+              <div class="field"><span>From library</span><span class="readonly" title="Changes here change this copy of it, not the library">{{ m.library }}</span></div>
+            }
             @if (m.shared) {
               <p class="hint">{{ m.shared }}</p>
             }
@@ -500,6 +506,7 @@ export class PropertiesPanel {
           ? `Shared with ${users - 1} other object${users > 2 ? 's' : ''}: changes apply to them too.`
           : '',
       groups,
+      library: libraryEntry(libraryIdOf(m) ?? '')?.name ?? '',
       note:
         m.type === 'MeshNormalMaterial'
           ? 'Ray tracing shades this as a Lambert material.'

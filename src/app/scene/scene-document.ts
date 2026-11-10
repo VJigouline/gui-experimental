@@ -482,16 +482,43 @@ export class SceneDocument {
         else mesh.material = next;
       }
     }
-    // Materials nothing uses any more are let go.
-    if (made.size) {
-      const used = new Set<THREE.Material>();
-      this.scene.traverse(c => {
-        if (!isSolidResult(c)) materialsOf(c).forEach(m => used.add(m));
-      });
-      for (const old of made.keys()) if (!used.has(old)) old.dispose();
-    }
+    this.freeUnused(made.keys());
     this.touch();
     return made.size;
+  }
+
+  /**
+   * Gives objects a material, such as one from the library: shapes, the shapes of solids, and
+   * every mesh inside groups and imported models. They all share it, so editing it changes them
+   * together. Returns how many meshes it was given to.
+   */
+  assignMaterial(ids: readonly string[], material: THREE.Material): number {
+    const meshes = new Set<THREE.Mesh>();
+    for (const o of this.objects(ids)) {
+      o.traverse(c => {
+        if ((c as THREE.Mesh).isMesh && !isSolidResult(c) && !c.userData['helper']) meshes.add(c as THREE.Mesh);
+      });
+    }
+    const old = new Set<THREE.Material>();
+    for (const mesh of meshes) {
+      materialsOf(mesh).forEach(m => old.add(m));
+      mesh.material = material;
+    }
+    old.delete(material);
+    this.freeUnused(old);
+    this.touch();
+    return meshes.size;
+  }
+
+  /** Disposes of materials nothing in the scene uses any more. */
+  private freeUnused(materials: Iterable<THREE.Material>): void {
+    const list = [...materials];
+    if (!list.length) return;
+    const used = new Set<THREE.Material>();
+    this.scene.traverse(c => {
+      if (!isSolidResult(c)) materialsOf(c).forEach(m => used.add(m));
+    });
+    for (const m of list) if (!used.has(m)) m.dispose();
   }
 
   /** Changes material properties of meshes, or the colour and intensity of lights. */

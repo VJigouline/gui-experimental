@@ -4,6 +4,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { RectAreaLightHelper } from 'three/examples/jsm/helpers/RectAreaLightHelper.js';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { LIBRARY_MIME, libraryDrag, libraryEntry, makeLibraryMaterial } from '../../scene/material-library';
 import { ToolMode, ViewName } from '../../core/bus/panel-bus';
 import { PanelContext } from '../../core/panels/panel-context';
 import { MenuService } from '../../ui/menu/menu.service';
@@ -114,6 +116,15 @@ export const BACKGROUNDS = [
         (click)="toggle('loops')">
         ⬚
       </button>
+      <button
+        type="button"
+        class="tool-btn"
+        [class.on]="reflections()"
+        [attr.aria-pressed]="reflections()"
+        title="Reflections: light the scene with a room around it, which metal and glass reflect (not ray traced)"
+        (click)="toggle('reflections')">
+        🌐
+      </button>
       <button type="button" class="tool-btn" title="Background" (click)="openBackgrounds($event)">◐</button>
       <span class="tool-sep"></span>
       <button
@@ -169,6 +180,10 @@ export class ViewportPanel {
   protected readonly axes = this.panel.state('axes', false);
   /** Show lights: where they are, which way they shine, their cones and panels. */
   protected readonly lightHelpers = this.panel.state('lightHelpers', true);
+  /** Light the scene with a room environment as well, for reflections in metal and glass. */
+  protected readonly reflections = this.panel.state('reflections', true);
+  /** The room environment, made once for this view's renderer. */
+  private environment?: THREE.Texture;
   protected readonly wireframe = this.panel.state('wireframe', false);
   /** Show the boundary loops of B-rep faces and surfaces, where the scene has them. */
   protected readonly loops = this.panel.state('loops', true);
@@ -255,6 +270,7 @@ export class ViewportPanel {
       this.wireframe();
       this.loops();
       this.lightHelpers();
+      this.reflections();
       this.background();
       this.theme.dark();
       untracked(() => this.requestRender());
@@ -289,6 +305,9 @@ export class ViewportPanel {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     // Area lights need their tables, once.
     initAreaLights();
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
     this.renderer.autoClear = false;
     container.appendChild(this.renderer.domElement);
 
@@ -317,6 +336,12 @@ export class ViewportPanel {
     const canvas = this.renderer.domElement;
     // Before the orbit and gizmo controls see it: a press on a selected shape's face, edge or corner sizes it.
     container.addEventListener('pointerdown', this.onEditPointerDown, { capture: true });
+    // Library materials dropped on objects.
+    container.addEventListener('dragover', this.onMaterialDragOver);
+    container.addEventListener('drop', this.onMaterialDrop);
+    container.addEventListener('dragleave', e => {
+      if (!container.contains(e.relatedTarget as Node | null)) this.editInfo.set(null);
+    });
     canvas.addEventListener('pointermove', this.onHover);
     canvas.addEventListener('pointerleave', this.onHoverLeave);
     canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -373,6 +398,9 @@ export class ViewportPanel {
     this.aimMarker.geometry.dispose();
     (this.aimMarker.material as THREE.Material).dispose();
     this.aiming?.cancel();
+    this.environment?.dispose();
+    this.containerRef().nativeElement.removeEventListener('dragover', this.onMaterialDragOver);
+    this.containerRef().nativeElement.removeEventListener('drop', this.onMaterialDrop);
     this.gridHelper.dispose();
     this.axesHelper.dispose();
     this.wireMaterial.dispose();
@@ -412,7 +440,12 @@ export class ViewportPanel {
       if (this.loops()) this.camera.layers.enable(FACE_LOOPS_LAYER);
       else this.camera.layers.disable(FACE_LOOPS_LAYER);
       scene.overrideMaterial = this.wireframe() ? this.wireMaterial : null;
+      // Each view has its own environment, made for its renderer; the scene holds none of its own.
+      scene.environment = this.reflections() && this.environment ? this.environment : null;
+      // Half strength: the scene's own lights do most of the lighting; the room adds reflections.
+      scene.environmentIntensity = ENVIRONMENT_INTENSITY;
       r.render(scene, this.camera);
+      scene.environment = null;
       scene.overrideMaterial = null;
       this.drawOperandGhosts(r);
       this.updateLightHelpers();
@@ -588,8 +621,15 @@ export class ViewportPanel {
     );
   }
 
-  protected toggle(key: 'grid' | 'axes' | 'wireframe' | 'loops' | 'lightHelpers'): void {
-    const current = { grid: this.grid, axes: this.axes, wireframe: this.wireframe, loops: this.loops, lightHelpers: this.lightHelpers }[key]();
+  protected toggle(key: 'grid' | 'axes' | 'wireframe' | 'loops' | 'lightHelpers' | 'reflections'): void {
+    const current = {
+      grid: this.grid,
+      axes: this.axes,
+      wireframe: this.wireframe,
+      loops: this.loops,
+      lightHelpers: this.lightHelpers,
+      reflections: this.reflections,
+    }[key]();
     this.panel.setState({ [key]: !current });
   }
 
@@ -731,6 +771,39 @@ export class ViewportPanel {
     }
     e.preventDefault();
   }
+
+  // ------------------------------------------------------------ library materials
+
+  /** The object a library material dropped here would go to: a shape, a solid or a model's part. */
+  private dropTarget(e: MouseEvent): THREE.Object3D | null {
+    if (!this.renderer) return null;
+    const o = this.firstHit(this.rayAt(e))?.object;
+    if (!o || !(o as THREE.Mesh).isMesh) return null;
+    return isSolidResult(o) ? o.parent : o;
+  }
+
+  private readonly onMaterialDragOver = (e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes(LIBRARY_MIME)) return;
+    e.preventDefault();
+    const target = this.dropTarget(e);
+    e.dataTransfer.dropEffect = target ? 'copy' : 'none';
+    const entry = libraryDrag.id ? libraryEntry(libraryDrag.id) : undefined;
+    this.editInfo.set(target ? `Drop to give ${entry?.name ?? 'the material'} to ${target.name || 'this object'}` : 'Drop onto an object to give it the material');
+  };
+
+  private readonly onMaterialDrop = (e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes(LIBRARY_MIME)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    this.editInfo.set(null);
+    libraryDrag.id = null;
+    const entry = libraryEntry(e.dataTransfer.getData(LIBRARY_MIME));
+    const target = this.dropTarget(e);
+    if (!entry || !target) return;
+    this.doc.assignMaterial([target.uuid], makeLibraryMaterial(entry));
+    // Selected, so Properties shows what it now has.
+    this.panel.publish('selection', { ids: [target.uuid] }, true);
+  };
 
   // ------------------------------------------------------------ lights
 
@@ -1560,6 +1633,9 @@ function isLight(colour: string): boolean {
     return false;
   }
 }
+
+/** How strongly the room environment lights the scene in views. */
+const ENVIRONMENT_INTENSITY = 0.5;
 
 type LightHelper = THREE.Object3D & { dispose?: () => void };
 

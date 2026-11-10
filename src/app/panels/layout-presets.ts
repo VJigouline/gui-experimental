@@ -29,7 +29,7 @@ export const APP_LAYOUT_PRESETS: readonly LayoutPreset[] = [
                 sizes: [0.55, 0.45],
                 children: [
                   { type: 'stack', panels: [{ id: 'props', type: 'properties' }, { id: 'links', type: 'links' }] },
-                  { type: 'stack', panels: [{ id: 'tools', type: 'tools' }, { id: 'raytrace', type: 'raytrace' }] },
+                  { type: 'stack', panels: [{ id: 'tools', type: 'tools' }, { id: 'materials', type: 'materials' }, { id: 'raytrace', type: 'raytrace' }] },
                 ],
               },
             ],
