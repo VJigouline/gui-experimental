@@ -18,6 +18,7 @@ import {
   Dimension, EditableShape, Handle, constrainedPoint, dimensionLines, editableShape, formatLength, pickHandle,
 } from '../../scene/primitive-edit';
 import { OPERAND_LAYER, isSolidResult, solidOf } from '../../scene/solids';
+import { assemblyOf } from '../../scene/assemblies';
 
 interface CameraState {
   position: [number, number, number];
@@ -56,7 +57,7 @@ export const BACKGROUNDS = [
       class="viewport-canvas"
       #container
       tabindex="0"
-      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; B to zoom to a box; G to walk; L for face loops; Z to ray trace; Delete to remove."
+      aria-label="3D view. Click to select; W, E, R for move, rotate, scale; F to fit; U up to the assembly; B to zoom to a box; G to walk; L for face loops; Z to ray trace; Delete to remove."
       [class.zoom-box]="zoomBox()"
       (keydown)="onKey($event)"
       (keyup)="onKeyUp($event)"
@@ -751,6 +752,10 @@ export class ViewportPanel {
       this.panel.publish('tool.mode', { mode: modes[key], space: t?.space ?? 'world', snap: t?.snap ?? null }, true);
     } else if (key === 'f') {
       this.fit();
+    } else if (key === 'u' && plain && !e.repeat) {
+      // Up to the assemblies the selection is in.
+      const ids = [...new Set(this.doc.objects(this.selection()?.ids).map(o => assemblyOf(o)?.uuid).filter((x): x is string => !!x))];
+      if (ids.length) this.panel.publish('selection', { ids }, true);
     } else if (key === 'l' && plain && !e.repeat) {
       this.toggle('loops');
     } else if (key === 'delete' || key === 'backspace') {

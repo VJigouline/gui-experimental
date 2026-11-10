@@ -1,4 +1,5 @@
 import { PanelType } from '../core/panels/panel-type';
+import { AssemblyPanel } from './assembly/assembly-panel';
 import { LinksPanel } from './links/links-panel';
 import { MaterialsPanel } from './materials/materials-panel';
 import { MessagesPanel } from './messages/messages-panel';
@@ -24,6 +25,14 @@ export const APP_PANEL_TYPES: readonly PanelType[] = [
     icon: '☰',
     description: "The scene's objects as a tree",
     component: SceneTreePanel,
+    multiple: true,
+  },
+  {
+    type: 'assembly',
+    title: 'Assemblies',
+    icon: '🗂',
+    description: 'The product structure: assemblies, subassemblies and parts, and making assemblies',
+    component: AssemblyPanel,
     multiple: true,
   },
   {

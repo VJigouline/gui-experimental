@@ -6,6 +6,7 @@ import { PanelContext } from '../../core/panels/panel-context';
 import { SceneDocument, isDocumentObject, kindOf, materialsOf } from '../../scene/scene-document';
 import { FieldValue, MATERIAL_GROUPS, MATERIAL_TYPES, MaterialField, SIDES, fieldsOf, materialType, readField } from '../../scene/materials';
 import { libraryEntry, libraryIdOf } from '../../scene/material-library';
+import { assemblyInfo, assemblyPath, isAssembly, productTree } from '../../scene/assemblies';
 import { DimensionName, dimensionsOf, editableShape, withDimension } from '../../scene/primitive-edit';
 import { SOLID_OPERATIONS, SolidOperation, canBeOperand, isSolid, isSolidResult, solidOf, solidOperation, solidResult } from '../../scene/solids';
 
@@ -25,6 +26,10 @@ interface Props {
   geometry: { vertices: number; triangles: number } | null;
   /** A primitive's sizes, before its scale. */
   dimensions: { name: DimensionName; label: string; value: number }[] | null;
+  /** For an assembly: what it says about itself, and what it holds. */
+  assembly: { partNumber: string; description: string; contents: string } | null;
+  /** The assemblies it is in, the outermost first. */
+  inAssembly: { id: string; name: string }[];
   /** For a solid: its operation, how many operands it combines, and the result's size. */
   solid: { operation: SolidOperation; operands: number; triangles: number } | null;
   /** For an operand of a solid: which solid, and its place among the operands. */
@@ -126,6 +131,35 @@ const round = (v: number, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
             </div>
           }
         </fieldset>
+
+        @if (p.assembly; as a) {
+          <fieldset>
+            <legend>Assembly</legend>
+            <label class="field">
+              <span>Part number</span>
+              <input class="input" [value]="a.partNumber" placeholder="None" (change)="doc.setAssemblyInfo(p.id, { partNumber: value($event) })" />
+            </label>
+            <label class="field">
+              <span>Description</span>
+              <input class="input" [value]="a.description" placeholder="None" (change)="doc.setAssemblyInfo(p.id, { description: value($event) })" />
+            </label>
+            <div class="field"><span>Contains</span><span class="readonly">{{ a.contents }}</span></div>
+          </fieldset>
+        }
+
+        @if (p.inAssembly.length) {
+          <div class="field assembly-path">
+            <span>In assembly</span>
+            <span class="crumbs">
+              @for (c of p.inAssembly; track c.id; let last = $last) {
+                <button type="button" class="link-btn" [title]="'Select ' + c.name" (click)="selectId(c.id)">{{ c.name }}</button>
+                @if (!last) {
+                  <span class="crumb-sep">›</span>
+                }
+              }
+            </span>
+          </div>
+        }
 
         @if (p.solid; as sol) {
           <fieldset>
@@ -430,6 +464,8 @@ export class PropertiesPanel {
         const shape = editableShape(o);
         return shape ? dimensionsOf(shape).map(d => ({ ...d, value: round(d.value) })) : null;
       })(),
+      assembly: isAssembly(o) ? assemblyProps(o) : null,
+      inAssembly: assemblyPath(o).map(a => ({ id: a.uuid, name: a.name || a.type })),
       solid: isSolid(o)
         ? {
             operation: solidOperation(o) ?? 'union',
@@ -534,6 +570,10 @@ export class PropertiesPanel {
     this.doc.setLight([id], { target: t });
   }
 
+  protected selectId(id: string): void {
+    this.panel.publish('selection', { ids: [id] }, true);
+  }
+
   protected value(event: Event): string {
     return (event.target as HTMLInputElement).value;
   }
@@ -587,6 +627,23 @@ function lightProps(light: THREE.Light): LightProps {
     out.target = l.target.getWorldPosition(new THREE.Vector3()).toArray().map(v => round(v)) as Vec;
   }
   return out;
+}
+
+/** An assembly's part number, description, and what it holds. */
+function assemblyProps(o: THREE.Object3D): { partNumber: string; description: string; contents: string } {
+  const info = assemblyInfo(o);
+  const inside = productTree(o);
+  const subs = inside.filter(n => n.kind === 'assembly').length;
+  const direct = inside.filter(n => n.kind === 'part' || n.kind === 'solid').length;
+  const all = inside.reduce((t, n) => t + n.parts, 0);
+  const parts: string[] = [];
+  if (subs) parts.push(`${subs} ${subs === 1 ? 'subassembly' : 'subassemblies'}`);
+  parts.push(`${direct} ${direct === 1 ? 'part' : 'parts'}`);
+  return {
+    partNumber: info.partNumber ?? '',
+    description: info.description ?? '',
+    contents: parts.join(', ') + (all !== direct ? ` (${all} parts in all)` : ''),
+  };
 }
 
 function triangles(g: THREE.BufferGeometry | undefined): number {

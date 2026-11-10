@@ -1652,3 +1652,78 @@ body.resizing-row canvas {
     font-size: 12px;
   }
 }
+
+/* The product structure: part numbers and part counts beside names. */
+.assembly-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+
+  .tree-row .tree-name {
+    flex: 0 1 auto;
+  }
+
+  .tree-pn {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tree-row .tree-count {
+    flex: none;
+    margin-left: auto;
+    padding-right: 8px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .assembly-row .tree-name {
+    font-weight: 600;
+  }
+
+  .panel-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .assembly-status {
+    flex: none;
+    margin: 0;
+    padding: 6px 10px;
+    border-top: 1px solid var(--border-subtle);
+    color: var(--muted);
+    font-size: 12px;
+  }
+}
+
+/* The assemblies an object is in, as links that select them. */
+.assembly-path {
+  margin: 0 0 6px;
+
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 4px;
+    min-width: 0;
+  }
+
+  .crumb-sep {
+    color: var(--muted);
+  }
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}

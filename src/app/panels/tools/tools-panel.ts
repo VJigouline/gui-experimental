@@ -111,6 +111,14 @@ const LIGHTS: { kind: LightKind; label: string; icon: string; title: string }[] 
         <button type="button" class="tool-btn big" [disabled]="!count()" (click)="remove()">🗑 Delete</button>
         <button type="button" class="tool-btn big" [disabled]="!count()" (click)="group()">▣ Group</button>
         <button type="button" class="tool-btn big" [disabled]="!canUngroup()" (click)="ungroup()">⬚ Ungroup</button>
+        <button
+          type="button"
+          class="tool-btn big"
+          [disabled]="!count()"
+          title="Make an assembly of the selection; inside an assembly, a subassembly"
+          (click)="makeAssembly()">
+          🗂 Assembly
+        </button>
         <button type="button" class="tool-btn big" [disabled]="!count()" (click)="fit()">⤢ Frame</button>
         <button type="button" class="tool-btn big" [disabled]="!count()" (click)="select([])">✕ Deselect</button>
       </div>
@@ -225,6 +233,11 @@ export class ToolsPanel {
   /** Combines the selection into a solid, and selects it. */
   protected combine(op: SolidOperation): void {
     const id = this.doc.combine(this.ids(), op);
+    if (id) this.select([id]);
+  }
+
+  protected makeAssembly(): void {
+    const id = this.doc.makeAssembly(this.ids());
     if (id) this.select([id]);
   }
 

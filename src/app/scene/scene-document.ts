@@ -1,8 +1,9 @@
 import { Injectable, computed, signal } from '@angular/core';
 import * as THREE from 'three';
 import { buildGeometry, editableShape } from './primitive-edit';
+import { AssemblyInfo, commonParent, isAssembly } from './assemblies';
 import { FieldValue, MATERIAL_FIELDS, convertMaterial, isMeshMaterial, writeField } from './materials';
-import { SOLID_OPERATIONS, SolidEngine, SolidOperation, canBeOperand, isSolid, isSolidResult, solidResult } from './solids';
+import { SOLID_OPERATIONS, SolidEngine, SolidOperation, canBeOperand, isSolid, isSolidResult, solidOf, solidResult } from './solids';
 
 /** The kinds of object the editing tools can add. */
 export type PrimitiveKind = 'box' | 'sphere' | 'cylinder' | 'cone' | 'torus' | 'knot' | 'plane' | 'group' | LightKind;
@@ -136,6 +137,7 @@ export class SceneDocument {
 
     const assembly = new THREE.Group();
     assembly.name = 'Assembly';
+    assembly.userData['assembly'] = {};
     this.scene.add(assembly);
     const at = (o: THREE.Object3D, x: number, y: number, z: number) => {
       o.position.set(x, y, z);
@@ -301,6 +303,53 @@ export class SceneDocument {
     parent.children[b] = o;
     this.touch();
     return true;
+  }
+
+  /**
+   * Combines objects into a new assembly, in the smallest assembly or group that holds them all,
+   * where it is a subassembly. They keep where they are; its origin is at the middle of their
+   * base. Lights, and shapes inside solids, are left out. Returns its id, or null with nothing to
+   * put in it.
+   */
+  makeAssembly(ids: readonly string[], name?: string): string | null {
+    const all = this.objects(ids).filter(o => !(o as THREE.Light).isLight && !solidOf(o));
+    const objects = all.filter(o => !all.some(p => p !== o && isAncestor(p, o)));
+    if (!objects.length) return null;
+    let parent = commonParent(objects, this.scene);
+    // Not inside a solid, which only takes shapes.
+    for (let p: THREE.Object3D | null = parent; p; p = p.parent) if (isSolid(p)) parent = p.parent ?? this.scene;
+    const assembly = new THREE.Group();
+    assembly.userData['assembly'] = {};
+    const sub = parent !== this.scene;
+    assembly.name = name?.trim() || this.nextName(sub ? 'Subassembly' : 'Assembly');
+    const box = new THREE.Box3();
+    objects.forEach(o => box.expandByObject(o));
+    parent.add(assembly);
+    parent.updateMatrixWorld(true);
+    if (!box.isEmpty()) {
+      const base = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2);
+      assembly.position.copy(parent.worldToLocal(base));
+    }
+    assembly.updateMatrixWorld(true);
+    objects.forEach(o => assembly.attach(o));
+    this.touch();
+    return assembly.uuid;
+  }
+
+  /** Changes an assembly's part number or description; a group becomes an assembly. */
+  setAssemblyInfo(id: string, patch: AssemblyInfo): void {
+    const o = this.get(id);
+    if (!o || !(o as THREE.Group).isGroup || isSolid(o)) return;
+    const info: AssemblyInfo = { ...((o.userData['assembly'] as AssemblyInfo | undefined) ?? {}) };
+    for (const key of ['partNumber', 'description'] as const) {
+      if (patch[key] !== undefined) {
+        const v = patch[key]!.trim();
+        if (v) info[key] = v;
+        else delete info[key];
+      }
+    }
+    o.userData['assembly'] = info;
+    this.touch();
   }
 
   /** Moves a group's children to its parent and removes the group. Returns the children's ids. */
@@ -703,6 +752,7 @@ export function isFaceLoops(o: THREE.Object3D): boolean {
 
 export function kindOf(o: THREE.Object3D): string {
   if (isSolid(o)) return 'Solid';
+  if (isAssembly(o)) return 'Assembly';
   if ((o as THREE.Light).isLight) return 'Light';
   if ((o as THREE.Mesh).isMesh) return 'Mesh';
   if ((o as THREE.Line).isLine) return 'Line';

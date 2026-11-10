@@ -21,7 +21,7 @@ export const APP_LAYOUT_PRESETS: readonly LayoutPreset[] = [
             direction: 'row',
             sizes: [0.18, 0.57, 0.25],
             children: [
-              { type: 'stack', panels: [{ id: 'tree', type: 'scene-tree' }] },
+              { type: 'stack', panels: [{ id: 'tree', type: 'scene-tree' }, { id: 'assembly', type: 'assembly' }] },
               { type: 'stack', panels: [{ id: 'view', type: 'viewport' }] },
               {
                 type: 'split',
