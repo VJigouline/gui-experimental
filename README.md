@@ -174,7 +174,13 @@ The **Assemblies** panel shows the scene as a product structure: assemblies, sub
 - **The Ray Tracing panel** chooses which 3D view to trace, and shows progress. It restarts, stops and saves the image as PNG, and has SceneEditor's settings: samples, bounces, resolution, preview, worker threads, shadows, global illumination, tone mapping, exposure, colour space and background. The settings are kept in the browser.
 - **Adding the panel:** it is a tab in the Modelling preset. Added from the Panels menu or toolbar, it opens in a floating window, like a dialog box.
 
-- **Environment:** what is around the scene, seen in reflections and refractions and lighting it: **Studio** (soft light boxes, as product photos use), **Sky**, **Sunset**, **Overcast**, or an equirectangular **.hdr**, **.exr** or image file. The panel shows it as one picture, with its intensity, its rotation round the vertical axis, and whether it shows behind the scene instead of the background colour. It starts as Studio at half strength, like the 3D views' reflections; a loaded file is kept for the visit only.
+- **Environment:** what is around the scene, seen in reflections and refractions and lighting it: **Studio** (soft light boxes, as product photos use), **Sky**, **Sunset**, **Overcast**, or files: **.hdr**, **.exr** or ordinary images in any of these projections, which the panel guesses from the image's shape and lets you change:
+  - **Equirectangular:** a 2:1 panorama.
+  - **Cube maps:** six images (named px, nx, py, ny, pz, nz, or posx, right, top, front and so on), or one image as a horizontal cross (4:3), a vertical cross (3:4), or a strip (6:1 or 1:6). Faces go where three.js puts them in a cube texture.
+  - **Spheres:** a photo of a mirror ball, or an angular-map light probe, both seen from +Z.
+  - **Cylindrical:** a panorama all the way round, with a band above and below the horizon.
+
+  Each is turned into an equirectangular image for the tracer. The panel shows it as one picture, with its intensity, its rotation round the vertical axis, and whether it shows behind the scene instead of the background colour. It starts as Studio at half strength, like the 3D views' reflections; a loaded file is kept for the visit only.
 
 One renderer is shared, so one 3D view is traced at a time.
 

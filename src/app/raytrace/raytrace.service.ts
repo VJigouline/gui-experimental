@@ -3,7 +3,17 @@ import { RaytracingRenderer, type RaytracingProgress } from 'meercad-raytracer';
 import * as THREE from 'three';
 import { SceneDocument } from '../scene/scene-document';
 import { DialogService } from '../ui/dialog/dialog.service';
-import { ENVIRONMENTS, EnvironmentKind, builtInEnvironment, environmentThumbnail, loadEnvironmentFile } from './environments';
+import {
+  ENVIRONMENTS,
+  EnvironmentKind,
+  EnvironmentSource,
+  Projection,
+  builtInEnvironment,
+  environmentThumbnail,
+  guessProjection,
+  projectEnvironment,
+  readEnvironmentFiles,
+} from './environments';
 
 /** Where the ray traced image is shown. */
 export type RaytraceMode = 'off' | 'view' | 'window';
@@ -109,7 +119,7 @@ export class RaytraceService {
   readonly settings = signal<RaytraceSettings>(readSettings());
   readonly progress = signal<RaytracingProgress>(IDLE);
   /** The environment loaded from a file, if any; kept for this visit only. */
-  readonly environmentFile = signal<{ name: string; texture: THREE.Texture } | null>(null);
+  readonly environmentFile = signal<{ name: string; source: EnvironmentSource; projection: Projection; texture: THREE.Texture } | null>(null);
   /** A picture of the environment in use, or null for none. */
   readonly environmentPreview = computed(() => {
     const t = this.environmentTexture();
@@ -320,18 +330,42 @@ export class RaytraceService {
     return traced;
   }
 
-  /** Loads an environment from a file and uses it. Returns an error message, or null. */
-  async loadEnvironment(file: File): Promise<string | null> {
+  /**
+   * Loads an environment from files and uses it: one image in any projection, guessed from its
+   * shape, or six cube faces. Returns an error message, or null.
+   */
+  async loadEnvironment(files: File[]): Promise<string | null> {
     try {
-      const texture = await loadEnvironmentFile(file);
-      this.environmentFile()?.texture.dispose();
-      this.environmentFile.set({ name: file.name, texture });
+      const source = await readEnvironmentFiles(files);
+      const hdr = files.some(f => /\.(hdr|exr)$/i.test(f.name));
+      const projection = guessProjection(source, hdr);
+      this.useEnvironment(source, projection);
       this.updateSettings({ environment: 'file' });
       return null;
     } catch (e) {
-      console.warn(`Couldn't read ${file.name} as an environment.`, e);
-      return `Couldn't read ${file.name}: ${e instanceof Error ? e.message : e}`;
+      const names = files.map(f => f.name).join(', ');
+      console.warn(`Couldn't read ${names} as an environment.`, e);
+      return `Couldn't read ${names}: ${e instanceof Error ? e.message : e}`;
     }
+  }
+
+  /** Reads the loaded images in another projection. Returns an error message, or null. */
+  setProjection(projection: Projection): string | null {
+    const file = this.environmentFile();
+    if (!file || file.projection === projection) return null;
+    try {
+      this.useEnvironment(file.source, projection);
+      this.targetView()?.requestRender();
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  private useEnvironment(source: EnvironmentSource, projection: Projection): void {
+    const texture = projectEnvironment(source, projection);
+    this.environmentFile()?.texture.dispose();
+    this.environmentFile.set({ name: source.name, source, projection, texture });
   }
 
   /** Called by a view when it changes size. */

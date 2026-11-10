@@ -1,7 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import * as THREE from 'three';
 import { MAX_WORKERS, RaytraceMode, RaytraceService, RaytraceSettings, SAME_AS_VIEW, describeProgress } from '../../raytrace/raytrace.service';
-import { ENVIRONMENTS, ENVIRONMENT_FILES, EnvironmentKind } from '../../raytrace/environments';
+import { ENVIRONMENTS, ENVIRONMENT_FILES, EnvironmentKind, PROJECTIONS, Projection, projectionsFor } from '../../raytrace/environments';
 import { downloadBlob } from '../../ui/files';
 import { SelectValue } from '../../ui/select-value';
 
@@ -116,7 +116,17 @@ import { SelectValue } from '../../ui/select-value';
             }
           </select>
         </label>
-        <input #envFile type="file" hidden [accept]="environmentFiles" (change)="loadEnvironment($event)" />
+        <input #envFile type="file" hidden multiple [accept]="environmentFiles" (change)="loadEnvironment($event)" />
+        @if (s().environment === 'file' && rt.environmentFile(); as f) {
+          <label class="field" [title]="projectionAbout()">
+            <span>Projection</span>
+            <select class="input" (change)="setProjection($event)">
+              @for (p of projections(); track p.id) {
+                <option [value]="p.id" [selected]="p.id === f.projection" [title]="p.about">{{ p.label }}</option>
+              }
+            </select>
+          </label>
+        }
         @if (rt.environmentPreview(); as src) {
           <img class="environment-preview" [src]="src" alt="The environment, all round, as one picture" />
         }
@@ -133,7 +143,13 @@ import { SelectValue } from '../../ui/select-value';
             <span>Background</span>
             <span class="check"><input type="checkbox" [checked]="s().environmentBackground" (change)="set({ environmentBackground: checked($event) })" /> Show behind the scene</span>
           </label>
-          <button type="button" class="btn" (click)="envFile.click()">Load .hdr, .exr or image…</button>
+          <button
+            type="button"
+            class="btn"
+            title="One image: a panorama, a cube map as a cross or strip, a mirror ball or a light probe; or six images, the faces of a cube map"
+            (click)="envFile.click()">
+            Load image or six cube faces…
+          </button>
         }
         @if (envError()) {
           <p class="hint">{{ envError() }}</p>
@@ -200,6 +216,13 @@ export class RaytracePanel {
   protected readonly envError = signal('');
   protected readonly environments = ENVIRONMENTS;
   protected readonly environmentFiles = ENVIRONMENT_FILES;
+  /** The projections the loaded images can have. */
+  protected readonly projections = computed(() => {
+    const f = this.rt.environmentFile();
+    const ids = f ? projectionsFor(f.source) : [];
+    return PROJECTIONS.filter(p => ids.includes(p.id));
+  });
+  protected readonly projectionAbout = computed(() => PROJECTIONS.find(p => p.id === this.rt.environmentFile()?.projection)?.about ?? '');
   protected readonly environmentAbout = computed(() => ENVIRONMENTS.find(e => e.kind === this.s().environment)?.about ?? '');
 
   protected readonly modeOptions: { value: RaytraceMode; name: string }[] = [
@@ -272,10 +295,14 @@ export class RaytracePanel {
 
   protected async loadEnvironment(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
+    const files = [...(input.files ?? [])];
     input.value = '';
-    if (!file) return;
-    this.envError.set((await this.rt.loadEnvironment(file)) ?? '');
+    if (!files.length) return;
+    this.envError.set((await this.rt.loadEnvironment(files)) ?? '');
+  }
+
+  protected setProjection(event: Event): void {
+    this.envError.set(this.rt.setProjection((event.target as HTMLSelectElement).value as Projection) ?? '');
   }
 
   protected setToneMapping(v: string): void {
