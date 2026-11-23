@@ -31,7 +31,7 @@
     "@angular/platform-browser": "^22.2.5",
     "@angular/router": "^22.2.5",
     "mc-ifc-import": "github:VJigouline/mc-ifc-import#a748335b1d8c698d988456aa0ed087a575ffffdf",
-    "meercad-raytracer": "github:VJigouline/MeerCADRaytracer#a01f4e91abcc30a8720aff9ecdb640ea06bbf79c",
+    "mc-raytracer": "github:VJigouline/mc-raytracer#9ccf62731415e88524f6a48d8a6b2daab3ed804b",
     "mc-step-import": "github:VJigouline/mc-step-import#4d7ac109b640969820a45cfe001a927f3952f4f5",
     "rxjs": "~7.8.0",
     "three": "^0.187.0",

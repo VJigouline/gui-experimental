@@ -6,7 +6,7 @@ import { downloadBlob } from '../../ui/files';
 import { SelectValue } from '../../ui/select-value';
 
 /**
- * Ray tracing with MeerCADRaytracer, as on SceneEditor's Photorealistic tab: where to show the
+ * Ray tracing with mc-raytracer, as on SceneEditor's Photorealistic tab: where to show the
  * image, its progress, and every setting, laid out like the workbench's other panels.
  */
 @Component({

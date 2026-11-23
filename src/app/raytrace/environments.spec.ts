@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import * as THREE from 'three';
-import { raytrace } from 'meercad-raytracer';
+import { raytrace } from 'mc-raytracer';
 import { SceneDocument } from '../scene/scene-document';
 import { ENVIRONMENTS, builtInEnvironment } from './environments';
 import { RaytraceService, SETTINGS_KEY } from './raytrace.service';

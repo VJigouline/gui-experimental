@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
-import { RaytracingRenderer, type RaytracingProgress } from 'meercad-raytracer';
+import { RaytracingRenderer, type RaytracingProgress } from 'mc-raytracer';
 import * as THREE from 'three';
 import { SceneDocument } from '../scene/scene-document';
 import { DialogService } from '../ui/dialog/dialog.service';

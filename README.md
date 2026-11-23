@@ -9,7 +9,7 @@ A workbench of panels in one browser page, built with Angular 22 and three.js. P
 - **Linked**, so that they work together.
 - **Saved** as layouts and restored.
 
-The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, ray tracing with [MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer), IFC and STEP import with [mc-ifc-import](https://github.com/VJigouline/mc-ifc-import) and [mc-step-import](https://github.com/VJigouline/mc-step-import), a message log, and a list of panels and their links.
+The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, ray tracing with [mc-raytracer](https://github.com/VJigouline/mc-raytracer), IFC and STEP import with [mc-ifc-import](https://github.com/VJigouline/mc-ifc-import) and [mc-step-import](https://github.com/VJigouline/mc-step-import), a message log, and a list of panels and their links.
 
 **Try it:** [vjigouline.github.io/gui-experimental](https://vjigouline.github.io/gui-experimental/)
 
@@ -88,7 +88,7 @@ The JSON format is described in [Documentation/Layout-Format.md](Documentation/L
 | Scene Tree | The scene's objects as a tree. Click to select; Ctrl+click and Shift+click select more. Double-click to frame, 👁 to hide. Drag a row onto another to move it inside. |
 | Properties | The selected object's name, visibility, transform, material or light, for editing; for a box, sphere, cylinder, cone, torus or plane, also its dimensions; for a light, the settings of its kind; for a material, its type and settings, as three.js has them. For IFC elements, also their entity type, GlobalId, materials and property sets; for STEP parts, their product and shape item. |
 | Edit Tools | The transform tool, with local axes and snapping. Adds shapes, groups, lights of each kind three.js has, and models (glTF, GLB, STL, OBJ, IFC, STEP). Duplicates, deletes, groups and ungroups the selection. Combines shapes into solids: union, subtract and intersect. |
-| Ray Tracing | Photorealistic images of a 3D view with MeerCADRaytracer, as on SceneEditor's Photorealistic tab. See [Ray tracing](#ray-tracing). |
+| Ray Tracing | Photorealistic images of a 3D view with mc-raytracer, as on SceneEditor's Photorealistic tab. See [Ray tracing](#ray-tracing). |
 | Materials | A library of common materials, with previews: wood, metal, glass, plastic and rubber, stone and concrete, fabric and leather, ceramic and paint. See [Materials](#materials). |
 | Messages | The messages panels send each other, with their channel, sender and content. |
 | Panels & Links | Every open panel, with its title, link and place, for editing. |
@@ -167,7 +167,7 @@ The **Assemblies** panel shows the scene as a product structure: assemblies, sub
 
 ## Ray tracing
 
-[MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer) traces the scene in web workers, as in SceneEditor.
+[mc-raytracer](https://github.com/VJigouline/mc-raytracer) traces the scene in web workers, as in SceneEditor.
 
 - **Over a 3D view:** press **Z** in a 3D view, or use its ☀ Ray trace button, to show the ray traced image over it. Press Z again to go back. The view still takes the mouse, so orbiting, selecting and the gizmo keep working, and every change starts the image again.
 - **In a separate window:** the Ray Tracing panel's ⧉ Window opens a browser window showing the image, which follows the 3D view's camera while the view keeps drawing with WebGL. Closing that window turns ray tracing off.
@@ -197,7 +197,7 @@ src/app/
   ui/              menus, dialogs, theme
   panels/          the sample panels, their registry and the layout presets
   scene/           SceneDocument, the shared three.js scene, and model import, including IFC and STEP
-  raytrace/        RaytraceService and its web worker, running MeerCADRaytracer
+  raytrace/        RaytraceService and its web worker, running mc-raytracer
   workbench/       the page: menu bar, toolbar, workspace and status bar
 ```
 
@@ -211,6 +211,6 @@ src/app/
 - **Angular** 22.2, standalone, zoneless, with signals.
 - **TypeScript** 6.0. This is the newest version Angular 22 supports; TypeScript 7 isn't supported yet.
 - **three.js** 0.187.
-- **MeerCADRaytracer**, **mc-ifc-import** and **mc-step-import**, pinned to commits, as in SceneEditor.
+- **mc-raytracer**, **mc-ifc-import** and **mc-step-import**, pinned to commits, as in SceneEditor.
 - **three-bvh-csg** 0.0.18, for solids, with three-mesh-bvh pinned to 0.9.10, the last without deprecation warnings for it.
 - **Vitest** 5, for the unit tests.

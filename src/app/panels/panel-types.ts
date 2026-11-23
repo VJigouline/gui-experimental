@@ -63,7 +63,7 @@ export const APP_PANEL_TYPES: readonly PanelType[] = [
     type: 'raytrace',
     title: 'Ray Tracing',
     icon: '☀',
-    description: 'Photorealistic images of a 3D view with MeerCADRaytracer',
+    description: 'Photorealistic images of a 3D view with mc-raytracer',
     component: RaytracePanel,
     multiple: false,
     float: { width: 360, height: 620 },

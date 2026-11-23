@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { raytrace } from 'meercad-raytracer';
+import { raytrace } from 'mc-raytracer';
 import { EnvironmentSource, Pixels, guessProjection, orderFaces, projectEnvironment, projectionsFor } from './environments';
 
 const FACE_COLOURS = [
