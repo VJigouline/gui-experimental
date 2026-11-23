@@ -745,7 +745,7 @@ export function isDocumentObject(o: THREE.Object3D): boolean {
  */
 export const FACE_LOOPS_LAYER = 1;
 
-/** Face boundary lines from STEP import, as MeerCADStepImport marks them. */
+/** Face boundary lines from STEP import, as mc-step-import marks them. */
 export function isFaceLoops(o: THREE.Object3D): boolean {
   return o.userData['stepEdges'] === true;
 }

@@ -90,9 +90,9 @@ export async function importModel(file: File, ifc?: IfcImportSettings, step?: St
     case '.step':
     case '.p21':
     case '.stpz': {
-      // AP203, AP214, AP242 and others, with MeerCADStepImport, as in SceneEditor.
+      // AP203, AP214, AP242 and others, with mc-step-import, as in SceneEditor.
       // .stpz is gzip-compressed; loadStepAsync inflates it.
-      const { loadStepAsync } = await import('meercad-step-import');
+      const { loadStepAsync } = await import('mc-step-import');
       const result = await loadStepAsync(await file.arrayBuffer(), {
         relativeTolerance: step?.relativeTolerance,
         angularTolerance: step ? (step.angularTolerance * Math.PI) / 180 : undefined,

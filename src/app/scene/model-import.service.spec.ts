@@ -25,7 +25,7 @@ describe('IFC import settings', () => {
 describe('STEP import settings', () => {
   beforeEach(() => localStorage.clear());
 
-  it("start from MeerCADStepImport's defaults and are remembered", () => {
+  it("start from mc-step-import's defaults and are remembered", () => {
     expect(readStepSettings()).toEqual(defaultStepSettings());
     writeStepSettings({ ...defaultStepSettings(), relativeTolerance: 0.005, includeHidden: true, ask: false });
     expect(readStepSettings()).toMatchObject({ relativeTolerance: 0.005, includeHidden: true, ask: false });

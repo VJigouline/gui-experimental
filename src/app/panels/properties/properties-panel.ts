@@ -691,7 +691,7 @@ function format(value: unknown): string {
 
 const STEP_KINDS: Record<string, string> = { product: 'Part or assembly', instance: 'Placed instance', shape: 'Shape' };
 
-/** What MeerCADStepImport puts in an object's userData.step, as label and value rows. */
+/** What mc-step-import puts in an object's userData.step, as label and value rows. */
 function stepInfo(data: unknown): { label: string; value: string }[] | null {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;

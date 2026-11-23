@@ -1,4 +1,4 @@
-/** Options for importing STEP files with MeerCADStepImport, as the STEP import dialog sets them. */
+/** Options for importing STEP files with mc-step-import, as the STEP import dialog sets them. */
 export interface StepImportSettings {
   /** Chord tolerance as a fraction of each solid's size: how far the mesh may be from the surface. */
   relativeTolerance: number;
@@ -16,7 +16,7 @@ export interface StepImportSettings {
 
 export const STEP_SETTINGS_KEY = 'gui-experimental.step.settings';
 
-/** MeerCADStepImport's own defaults; 0.2 rad is about 11.5°. */
+/** mc-step-import's own defaults; 0.2 rad is about 11.5°. */
 export function defaultStepSettings(): StepImportSettings {
   return { relativeTolerance: 0.001, angularTolerance: 11.5, maxTrianglesPerFace: 50000, includeHidden: false, preferTessellated: false, ask: true };
 }
