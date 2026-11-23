@@ -1,4 +1,4 @@
-/** Options for importing IFC files with MeerCADIFCImport, as the IFC import dialog sets them. */
+/** Options for importing IFC files with mc-ifc-import, as the IFC import dialog sets them. */
 export interface IfcImportSettings {
   /** Subtract openings and voiding features from the elements they void. */
   openings: boolean;
@@ -18,7 +18,7 @@ export interface IfcImportSettings {
 
 export const IFC_SETTINGS_KEY = 'gui-experimental.ifc.settings';
 
-/** MeerCADIFCImport's own defaults. */
+/** mc-ifc-import's own defaults. */
 export function defaultIfcSettings(): IfcImportSettings {
   return { openings: true, spaces: false, openingElements: false, properties: true, circleSegments: 24, creaseAngle: 30, ask: true };
 }

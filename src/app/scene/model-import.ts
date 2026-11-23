@@ -69,8 +69,8 @@ export async function importModel(file: File, ifc?: IfcImportSettings, step?: St
       break;
     }
     case '.ifc': {
-      // IFC2X3 and the IFC4 line, with MeerCADIFCImport, as in SceneEditor.
-      const { loadIfc } = await import('meercad-ifc-import');
+      // IFC2X3 and the IFC4 line, with mc-ifc-import, as in SceneEditor.
+      const { loadIfc } = await import('mc-ifc-import');
       const data = await file.arrayBuffer();
       const result = loadIfc(data, {
         openings: ifc?.openings,

@@ -9,7 +9,7 @@ A workbench of panels in one browser page, built with Angular 22 and three.js. P
 - **Linked**, so that they work together.
 - **Saved** as layouts and restored.
 
-The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, ray tracing with [MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer), IFC and STEP import with [MeerCADIFCImport](https://github.com/VJigouline/MeerCADIFCImport) and [mc-step-import](https://github.com/VJigouline/mc-step-import), a message log, and a list of panels and their links.
+The sample panels edit a 3D scene: 3D views, a scene tree, properties, editing tools, ray tracing with [MeerCADRaytracer](https://github.com/VJigouline/MeerCADRaytracer), IFC and STEP import with [mc-ifc-import](https://github.com/VJigouline/mc-ifc-import) and [mc-step-import](https://github.com/VJigouline/mc-step-import), a message log, and a list of panels and their links.
 
 **Try it:** [vjigouline.github.io/gui-experimental](https://vjigouline.github.io/gui-experimental/)
 
@@ -97,7 +97,7 @@ The JSON format is described in [Documentation/Layout-Format.md](Documentation/L
 
 glTF, GLB, STL, OBJ, IFC and STEP files can be imported from **File › Import model…**, the toolbar's **Import…**, or **Edit Tools**. They can also be dropped onto the page. As in SceneEditor:
 
-- **IFC files** are read with [MeerCADIFCImport](https://github.com/VJigouline/MeerCADIFCImport): IFC2X3 and the IFC4 line, in metres with Y up. The **Import IFC** dialog sets its options first: cutting openings out of elements, circle segments, the smoothing angle, room volumes, opening volumes, and property sets. The choices are kept in the browser. Untick *Ask before each IFC import* to skip the dialog, and change the settings later in **File › IFC import settings…**.
+- **IFC files** are read with [mc-ifc-import](https://github.com/VJigouline/mc-ifc-import): IFC2X3 and the IFC4 line, in metres with Y up. The **Import IFC** dialog sets its options first: cutting openings out of elements, circle segments, the smoothing angle, room volumes, opening volumes, and property sets. The choices are kept in the browser. Untick *Ask before each IFC import* to skip the dialog, and change the settings later in **File › IFC import settings…**.
 - **STEP files** (`.stp`, `.step`, `.p21`, and gzip-compressed `.stpz`) are read with [mc-step-import](https://github.com/VJigouline/mc-step-import): AP203, AP214, AP242 and others, with their assembly structure, colours and units, in metres with Y up. The **Import STEP** dialog sets the tessellation first. Quality is the chord tolerance as a share of each solid's size. The angle and the per-face triangle limit can also be set, as can whether to include hidden items or prefer AP242 tessellated shapes. It is remembered and can be skipped like the IFC dialog; **File › STEP import settings…** changes it later. An IFC file named `.stp` is refused with a Failure dialog. Files of 2 MB or more are tessellated in web workers (`src/app/scene/step.worker.ts`), up to six at once. A 95 MB assembly then imports in about 6 s rather than 15, and the page keeps drawing meanwhile.
 - **While a file imports,** a dialog says so, since the readers run in the page. Large IFC models take a few seconds.
 - **A file that can't be read** shows a **Failure** dialog with the reason, and the scene is unchanged. Warnings go to the browser console.
@@ -211,6 +211,6 @@ src/app/
 - **Angular** 22.2, standalone, zoneless, with signals.
 - **TypeScript** 6.0. This is the newest version Angular 22 supports; TypeScript 7 isn't supported yet.
 - **three.js** 0.187.
-- **MeerCADRaytracer**, **MeerCADIFCImport** and **mc-step-import**, pinned to commits, as in SceneEditor.
+- **MeerCADRaytracer**, **mc-ifc-import** and **mc-step-import**, pinned to commits, as in SceneEditor.
 - **three-bvh-csg** 0.0.18, for solids, with three-mesh-bvh pinned to 0.9.10, the last without deprecation warnings for it.
 - **Vitest** 5, for the unit tests.

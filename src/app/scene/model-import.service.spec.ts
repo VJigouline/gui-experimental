@@ -10,7 +10,7 @@ import { SceneDocument } from './scene-document';
 describe('IFC import settings', () => {
   beforeEach(() => localStorage.clear());
 
-  it("start from MeerCADIFCImport's defaults and are remembered", () => {
+  it("start from mc-ifc-import's defaults and are remembered", () => {
     expect(readIfcSettings()).toEqual(defaultIfcSettings());
     writeIfcSettings({ ...defaultIfcSettings(), spaces: true, circleSegments: 48, ask: false });
     expect(readIfcSettings()).toMatchObject({ spaces: true, circleSegments: 48, ask: false });

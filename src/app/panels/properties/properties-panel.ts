@@ -76,7 +76,7 @@ interface LightProps {
   traced: boolean;
 }
 
-/** What MeerCADIFCImport puts in an object's userData.ifc, formatted for display. */
+/** What mc-ifc-import puts in an object's userData.ifc, formatted for display. */
 interface IfcInfo {
   rows: { label: string; value: string }[];
   sets: { name: string; rows: { label: string; value: string }[] }[];
