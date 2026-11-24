@@ -1,0 +1,43 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx ng build --base-href /gui-experimental/
+      # Pages serves 404.html for unknown paths; the app's own router handles them.
+      - run: cp dist/gui-experimental/browser/index.html dist/gui-experimental/browser/404.html
+      - run: touch dist/gui-experimental/browser/.nojekyll
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/gui-experimental/browser
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

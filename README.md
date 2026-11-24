@@ -22,12 +22,11 @@ npm install
 npm start          # http://localhost:4200/
 npm test           # unit tests, with Vitest
 npm run build      # production build in dist/
-npm run deploy     # build and publish to GitHub Pages
 ```
 
 It needs Node.js 22.22, 24.15, or 26 and later, as Angular 22 does. The page needs a browser with WebGL.
 
-`npm run deploy` builds the app for the `/gui-experimental/` path and pushes it to the `gh-pages` branch, which GitHub Pages serves. Changes appear on the site a minute or so later.
+Every push to `master` deploys the app to GitHub Pages: the `Deploy to GitHub Pages` workflow (`.github/workflows/deploy-pages.yml`) builds it for the `/gui-experimental/` path and publishes it. Changes appear on the site a couple of minutes later. To redeploy without a push, run the workflow from the repository's Actions tab.
 
 ## Arranging panels
 
